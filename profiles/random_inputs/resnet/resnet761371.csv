@@ -1,0 +1,73 @@
+==761371== NVPROF is profiling process 761371, command: exe/linux_inference -gpu 0 -model resnet
+==761371== Profiling application: exe/linux_inference -gpu 0 -model resnet
+==761371== Profiling result:
+"Type","Time(%)","Time","Calls","Avg","Min","Max","Name"
+,%,ms,,us,us,ms,
+"GPU activities",76.978956,17.368009,125,138.944000,0.864000,3.910885,"[CUDA memcpy HtoD]"
+"GPU activities",5.822705,1.313720,9,145.968000,106.367000,0.220831,"volta_sgemm_128x64_nn"
+"GPU activities",3.358968,0.757851,4,189.462000,188.287000,0.190815,"volta_scudnn_winograd_128x128_ldg1_ldg4_relu_tile148t_nt_v1"
+"GPU activities",2.295379,0.517884,9,57.542000,5.952000,0.147135,"void cudnn::winograd_nonfused::winogradForwardFilter4x4<float, float>(cudnn::winograd_nonfused::WinogradFilterParams<float, float>)"
+"GPU activities",1.965613,0.443482,20,22.174000,5.824000,0.146303,"void cudnn::detail::bn_fw_inf_1C11_kernel_NCHW<float, float, bool=1, int=1>(float, cudnn::detail::bn_fw_inf_1C11_kernel_NCHW<float, float, bool=1, int=1>, cudnnTensorStruct, float const *, float, cudnnTensorStruct*, float, cudnn::detail::bn_fw_inf_1C11_kernel_NCHW<float, float, bool=1, int=1> const *, cudnn::detail::bn_fw_inf_1C11_kernel_NCHW<float, float, bool=1, int=1> const , cudnn::detail::bn_fw_inf_1C11_kernel_NCHW<float, float, bool=1, int=1> const , cudnn::detail::bn_fw_inf_1C11_kernel_NCHW<float, float, bool=1, int=1> const , cudnn::detail::bn_fw_inf_1C11_kernel_NCHW<float, float, bool=1, int=1>)"
+"GPU activities",1.446391,0.326335,17,19.196000,2.272000,0.137439,"_ZN2at6native29vectorized_elementwise_kernelILi4EZZZNS0_83_GLOBAL__N__59_tmpxft_000083ec_00000000_9_TensorCompare_compute_70_cpp1_ii_d0af11f728clamp_min_scalar_kernel_implERNS_14TensorIteratorEN3c106ScalarEENKUlvE_clEvENKUlvE6_clEvEUlfE_NS_6detail5ArrayIPcLi2EEEEEviT0_T1_"
+"GPU activities",1.259165,0.284093,9,31.565000,13.599000,0.052992,"void cudnn::winograd_nonfused::winogradForwardData4x4<float, float>(cudnn::winograd_nonfused::WinogradDataParams<float, float>)"
+"GPU activities",1.243993,0.280670,2,140.335000,136.287000,0.144383,"volta_scudnn_128x64_relu_small_nn_v1"
+"GPU activities",1.233639,0.278334,1,278.334000,278.334000,0.278334,"void cudnn::detail::implicit_convolve_sgemm<float, float, int=1024, int=5, int=5, int=3, int=3, int=3, int=1, bool=1, bool=0, bool=1>(int, int, int, float const *, int, float*, cudnn::detail::implicit_convolve_sgemm<float, float, int=1024, int=5, int=5, int=3, int=3, int=3, int=1, bool=1, bool=0, bool=1>*, kernel_conv_params, int, float, float, int, float, float, int, int)"
+"GPU activities",1.223007,0.275935,9,30.659000,15.488000,0.049248,"void cudnn::winograd_nonfused::winogradForwardOutput4x4<float, float>(cudnn::winograd_nonfused::WinogradOutputParams<float, float>)"
+"GPU activities",1.041037,0.234879,1,234.879000,234.879000,0.234879,"volta_scudnn_128x64_relu_medium_nn_v1"
+"GPU activities",0.747167,0.168576,8,21.072000,3.168000,0.052416,"void at::native::vectorized_elementwise_kernel<int=4, at::native::BinaryFunctor<float, float, float, at::native::AddFunctor<float>>, at::detail::Array<char*, int=3>>(int, float, float)"
+"GPU activities",0.544486,0.122847,1,122.847000,122.847000,0.122847,"void at::native::_GLOBAL__N__62_tmpxft_000088e1_00000000_9_DilatedMaxPool2d_compute_70_cpp1_ii_6258b574::max_pool_forward_nchw<float, float>(int, float const *, int, int, int, int, int, int, int, int, int, int, int, int, int, int, at::native::_GLOBAL__N__62_tmpxft_000088e1_00000000_9_DilatedMaxPool2d_compute_70_cpp1_ii_6258b574::max_pool_forward_nchw<float, float>*, long*)"
+"GPU activities",0.427191,0.096383,2,48.191000,30.176000,0.066207,"volta_scudnn_128x128_relu_interior_nn_v1"
+"GPU activities",0.127790,0.028832,1,28.832000,28.832000,0.028832,"volta_scudnn_128x64_relu_interior_nn_v1"
+"GPU activities",0.069497,0.015680,4,3.920000,3.840000,0.004064,"void cudnn::winograd::generateWinogradTilesKernel<int=0, float, float>(cudnn::winograd::GenerateWinogradTilesParams<float, float>)"
+"GPU activities",0.059144,0.013344,1,13.344000,13.344000,0.013344,"volta_sgemm_128x32_tn"
+"GPU activities",0.050492,0.011392,6,1.898000,1.760000,0.002144,"cudnn::gemm::computeOffsetsKernel(cudnn::gemm::ComputeOffsetsParams)"
+"GPU activities",0.040989,0.009248,1,9.248000,9.248000,0.009248,"void at::native::reduce_kernel<int=512, int=1, at::native::ReduceOp<float, at::native::MeanOps<float, float>, unsigned int, float, int=4>>(float)"
+"GPU activities",0.029501,0.006656,4,1.664000,1.536000,0.001792,"[CUDA memset]"
+"GPU activities",0.021275,0.004800,1,4.800000,4.800000,0.004800,"_ZN2at6native27unrolled_elementwise_kernelIZZZNS0_21copy_device_to_deviceERNS_14TensorIteratorEbENKUlvE1_clEvENKUlvE6_clEvEUlfE_NS_6detail5ArrayIPcLi2EEE16OffsetCalculatorILi1EjLb0EESC_NS0_6memory15LoadWithoutCastENSD_16StoreWithoutCastEEEviT_T0_T1_T2_T3_T4_"
+"GPU activities",0.013616,0.003072,1,3.072000,3.072000,0.003072,"void splitKreduce_kernel<float, float, float>(cublasSplitKParams<float>, float const *, float const *, float*, float const *, float const *)"
+"API calls",99.169918,8075.608499,33,244715.409000,4.589000,8060.175559,"cudaMalloc"
+"API calls",0.431723,35.156056,194,181.216000,0.117000,16.602111,"cuDeviceGetAttribute"
+"API calls",0.284901,23.200105,123,188.618000,3.773000,4.339648,"cudaMemcpyAsync"
+"API calls",0.038478,3.133321,2,1566.660000,1419.443000,1.713878,"cuDeviceTotalMem"
+"API calls",0.018254,1.486498,123,12.085000,3.640000,0.089994,"cudaStreamSynchronize"
+"API calls",0.014388,1.171663,107,10.950000,4.630000,0.070851,"cudaLaunchKernel"
+"API calls",0.012015,0.978376,1,978.376000,978.376000,0.978376,"cudaHostAlloc"
+"API calls",0.010315,0.839958,4,209.989000,159.152000,0.359252,"cudaGetDeviceProperties"
+"API calls",0.006808,0.554366,1865,0.297000,0.224000,0.007245,"cudaGetDevice"
+"API calls",0.006019,0.490163,8,61.270000,1.665000,0.454305,"cudaStreamCreateWithFlags"
+"API calls",0.003006,0.244772,338,0.724000,0.359000,0.003410,"cudaFuncSetAttribute"
+"API calls",0.001028,0.083705,4,20.926000,9.682000,0.052654,"cudaMemsetAsync"
+"API calls",0.000688,0.056036,41,1.366000,0.955000,0.002190,"cudaEventRecord"
+"API calls",0.000678,0.055240,2,27.620000,26.883000,0.028357,"cuDeviceGetName"
+"API calls",0.000392,0.031897,48,0.664000,0.430000,0.001749,"cudaEventCreateWithFlags"
+"API calls",0.000362,0.029449,2,14.724000,13.093000,0.016356,"cudaMemcpy"
+"API calls",0.000267,0.021748,102,0.213000,0.098000,0.002189,"cudaGetLastError"
+"API calls",0.000191,0.015594,40,0.389000,0.249000,0.001587,"cudaDeviceGetAttribute"
+"API calls",0.000111,0.009035,4,2.258000,1.720000,0.002701,"cudaStreamCreateWithPriority"
+"API calls",0.000093,0.007584,4,1.896000,1.258000,0.002492,"cuDeviceGetPCIBusId"
+"API calls",0.000091,0.007382,1,7.382000,7.382000,0.007382,"cudaBindTexture"
+"API calls",0.000062,0.005015,7,0.716000,0.373000,0.001548,"cudaFree"
+"API calls",0.000044,0.003575,1,3.575000,3.575000,0.003575,"cudaEventQuery"
+"API calls",0.000033,0.002703,3,0.901000,0.432000,0.001569,"cudaSetDevice"
+"API calls",0.000028,0.002297,3,0.765000,0.213000,0.001533,"cuDeviceGetCount"
+"API calls",0.000027,0.002230,1,2.230000,2.230000,0.002230,"cudaHostGetDevicePointer"
+"API calls",0.000021,0.001727,1,1.727000,1.727000,0.001727,"cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags"
+"API calls",0.000014,0.001172,4,0.293000,0.122000,0.000661,"cuDeviceGet"
+"API calls",0.000014,0.001133,1,1.133000,1.133000,0.001133,"cudaDeviceGetStreamPriorityRange"
+"API calls",0.000013,0.001082,1,1.082000,1.082000,0.001082,"cudaUnbindTexture"
+"API calls",0.000011,0.000886,4,0.221000,0.155000,0.000390,"cudaGetDeviceCount"
+"API calls",0.000006,0.000529,2,0.264000,0.256000,0.000273,"cuDeviceGetUuid"
+
+==761371== System profiling result:
+"","Device","Count","Avg","Min","Max"
+"SM Clock (MHz)","Quadro RTX 8000 (0)",83,1381.807229,300.000000,1395.000000
+"Memory Clock (MHz)","Quadro RTX 8000 (0)",83,6426.566265,405.000000,6500.000000
+"Temperature (C)","Quadro RTX 8000 (0)",164,42.603659,41.000000,43.000000
+"Power (mW)","Quadro RTX 8000 (0)",164,62346.457317,27208.000000,63474.000000
+"Fan (%)","Quadro RTX 8000 (0)",82,33.000000,33.000000,33.000000
+"SM Clock (MHz)","Quadro RTX 8000 (1)",82,300.000000,300.000000,300.000000
+"Memory Clock (MHz)","Quadro RTX 8000 (1)",82,405.000000,405.000000,405.000000
+"Temperature (C)","Quadro RTX 8000 (1)",164,44.000000,44.000000,44.000000
+"Power (mW)","Quadro RTX 8000 (1)",164,30041.304878,29830.000000,30208.000000
+"Fan (%)","Quadro RTX 8000 (1)",82,33.000000,33.000000,33.000000
+==761371== Warning: Some profiling data are not recorded. Make sure cudaProfilerStop() or cuProfilerStop() is called before application exit to flush profile data.
