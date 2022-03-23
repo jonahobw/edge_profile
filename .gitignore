@@ -1,7 +1,5 @@
-temp.py
-testing.py
-practice.py
-profiles.png
+ignore/
+exe/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
