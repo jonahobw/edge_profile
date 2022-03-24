@@ -1,3 +1,6 @@
+import json
+import os
+import shutil
 import sys
 import subprocess
 from pathlib import Path
@@ -27,16 +30,23 @@ parser.add_argument("-seed", type=int, default=-1,
                          "profile2: modelA: inputsY, modelB: inputsY."
                     )
 parser.add_argument("-folder", type=str, default=None,
-                    help="Name of subfolder under cwd/profiles/ to save these profiles to.  Default is the date and time.")
+                    help="Name of subfolder under cwd/profiles/ to save these profiles to.  "
+                         "Default is the date and time.")
+parser.add_argument("-noexe", action='store_true', help="If provided, will run the inference using the python file"
+                                                        " rather than the executable file. This is faster but "
+                                                        " is not the type of attack vector considered, so it "
+                                                        " should only be used for debugging.")
+parser.add_argument("-nosave", action='store_true', help="do not save any traces, just debug.")
 
 args = parser.parse_args()
 
 if args.input not in ["random", "0", "1"]:
     raise ValueError(f"Provided -input argument {args.input} but valid options are 'random', '0', or '1'.")
 
+# create folder for these profiles
 subfolder = args.folder
 if not subfolder:
-    subfolder = time.strftime("%m-%d-%y", time.gmtime())
+    subfolder = time.strftime("%I%M%p_%m-%d-%y", time.gmtime())
 
 profile_folder = Path.cwd() / "profiles" / subfolder
 profile_folder.mkdir(parents=True, exist_ok=True)
@@ -45,7 +55,28 @@ profile_folder.mkdir(parents=True, exist_ok=True)
 alpha = 0.8
 beta = 0.2
 
+# random seeds
 i_seeds = [random.randint(0, 999999) for i in range(args.i)]
+
+# file to execute
+if os.name != 'nt':
+    system = "linux"
+else:
+    system = "windows"
+executable = f"exe/{system}/{system}_inference.exe"
+if args.noexe:
+    # use python file instead
+    executable = "model_inference.py"
+
+# save arguments to json file
+file = profile_folder / "arguments.json"
+save_args = vars(args)
+save_args["executable"] = executable
+save_args["random_seed"] = i_seeds
+save_args["system"] = system
+save_args["folder"] = str(profile_folder)
+with open(file, 'w') as f:
+    json.dump(save_args, f, indent=4)
 
 for model in ['resnet', 'googlenet', 'mobilenetv3', 'vgg']:
     model_folder = profile_folder / model
@@ -67,7 +98,8 @@ for model in ['resnet', 'googlenet', 'mobilenetv3', 'vgg']:
             seed = args.seed
 
         command = f"nvprof --csv --log-file {log_file_prefix}%p.csv --system-profiling on " \
-                  f"--profile-child-processes exe/linux_inference -gpu {args.gpu} -model {model} -seed {seed}"
+                  f"--profile-child-processes {executable} -gpu {args.gpu} -model {model} -seed {seed} " \
+                  f"-n {args.n} -input {args.input}"
         output = subprocess.run(shlex.split(command), stdout=sys.stdout)
         wma = alpha * wma + beta * (time.time() - start)
         est_time = ((args.i - i) * wma) / 60 # in minutes
@@ -75,3 +107,7 @@ for model in ['resnet', 'googlenet', 'mobilenetv3', 'vgg']:
 
     print("Allowing GPUs to cool between models ...")
     time.sleep(args.sleep)
+
+
+if args.nosave:
+    shutil.rmtree(profile_folder)
