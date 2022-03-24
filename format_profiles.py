@@ -1,6 +1,9 @@
-import pandas as pd
+import json
 from pathlib import Path
+import pandas as pd
 import numpy as np
+from collect_profiles import check_profile
+
 
 def parse_one_aggregate_profile(csv_file=None, example=False, nrows=55, skiprows=3):
     """
@@ -140,7 +143,7 @@ def parse_one_profile(csv_file=None, example=False, gpu=0):
     return gpu_prof.append(system_prof)
 
 
-def parse_all_profiles(folder="profiles", save_filename=None, gpu=0):
+def parse_all_profiles(folder="profiles", save_filename=None, gpu=0, verbose=True):
     """
     Parses all of the profiles under the folder into one dataframe saved as a csv in the folder.
 
@@ -151,8 +154,15 @@ def parse_all_profiles(folder="profiles", save_filename=None, gpu=0):
                         such as ./profiles/<folder>/resnet/resnet12345.csv
     :param save_filename: the filename of the combined csv to save.
     :param gpu: the gpu that the profile was run on.
+    :param verbose: print messages.
     :return: None, just saves a csv file.
     """
+
+    # check that all profiles are valid
+    valid, _ = validate_profiles(folder, remove=False)
+    if not valid:
+        raise ValueError("Invalid profiles, fix before aggregating.")
+
     root_folder = Path.cwd() / "profiles" / folder
     if not root_folder.exists():
         raise FileNotFoundError(f"Folder {root_folder} does not exist.")
@@ -161,8 +171,12 @@ def parse_all_profiles(folder="profiles", save_filename=None, gpu=0):
 
     for subdir in [x for x in root_folder.iterdir() if x.is_dir()]:
         model = subdir.name
+        if verbose:
+            print(f"Parsing profiles for {model}")
         for csv_profile in [x for x in subdir.iterdir()]:
             file = csv_profile.name
+            if verbose:
+                print(f"\t{file}")
             prof = parse_one_profile(csv_file=csv_profile, gpu=gpu)
             prof = pd.Series({"file" : file, "model": model}).append(prof)
             combined = combined.append(prof, ignore_index=True)
@@ -174,4 +188,66 @@ def parse_all_profiles(folder="profiles", save_filename=None, gpu=0):
     combined.to_csv(save_path, index=False)
     return
 
-a = parse_all_profiles("debug_profiles")
+
+def validate_profiles(folder, remove=False):
+    """
+    Checks all the profiles under ./profiles/<folder> to see if nvprof failed and lists them, optionally removing them.
+
+    :param folder: the folder containing subfolders by model architecture, which contain profiles,
+                        such as ./profiles/<folder>/resnet/resnet12345.csv
+    :param remove: boolean whether or not to remove the files
+    :return: a tuple of (boolean indicating whether there were any invalid profiles,
+                    a dictionary of how many invalid profiles there are by model, with the file names)
+    """
+
+    print("Checking profile validity ... ")
+
+    root_folder = Path.cwd() / "profiles" / folder
+    if not root_folder.exists():
+        raise FileNotFoundError(f"Folder {root_folder} does not exist.")
+
+    all_valid = True
+    invalid_profiles = {}
+
+    for subdir in [x for x in root_folder.iterdir() if x.is_dir()]:
+        model = subdir.name
+        invalid_profiles[model] = {"num_invalid": 0, "invalid_profiles": []}
+        print(f"Parsing profiles for {model}")
+        for csv_profile in [x for x in subdir.iterdir()]:
+            file = csv_profile.name
+            valid = check_profile(csv_profile)
+            if not valid:
+                all_valid = False
+                print(f"\t{file} is invalid!")
+                invalid_profiles[model]["num_invalid"] += 1
+                invalid_profiles[model]["invalid_profiles"].append(str(csv_profile))
+            if remove:
+                csv_profile.unlink()
+
+    if all_valid:
+        print("All profiles valid!\n\n")
+    else:
+        print("Invalid profiles!")
+        print(json.dumps(invalid_profiles, indent=4))
+    return all_valid, invalid_profiles
+
+
+def read_csv(folder=None, gpu=0):
+    """
+    Reads the aggregated csv data from the folder.  If the aggregated csv does not exist, creates it.
+
+    :param folder: the folder name under ./profiles/<folder> where the profiles are stored.
+    :return: a pandas dataframe
+    """
+    if not folder:
+        folder = "debug_profiles"
+
+    folder_path = Path.cwd() / "profiles" / folder
+    aggregated_csv_file = folder_path / "aggregated.csv"
+    if not aggregated_csv_file.exists():
+        parse_all_profiles(folder, gpu=gpu)
+    return pd.read_csv(aggregated_csv_file)
+
+
+if __name__ == '__main__':
+    a = parse_all_profiles("debug_profiles")
