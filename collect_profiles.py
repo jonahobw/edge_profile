@@ -66,7 +66,7 @@ else:
 executable = f"exe/{system}/{system}_inference.exe"
 if args.noexe:
     # use python file instead
-    executable = "model_inference.py"
+    executable = "python model_inference.py"
 
 # save arguments to json file
 file = profile_folder / "arguments.json"
