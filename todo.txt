@@ -1,0 +1,4 @@
+-   when validating in format_profiles.parse_all_profiles(), also validate class balance
+-   when validating add a check for nans in the data.
+-   figure out where nan columns such as "avg_us_nan" come from in aggregated csv (zero_noexe as example)
+-   implement recursive feature selection

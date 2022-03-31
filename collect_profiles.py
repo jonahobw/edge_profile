@@ -11,12 +11,23 @@ import random
 
 
 def check_profile(profile_csv):
-    """Loose check to see if nvprof failed, returns a boolean."""
+    """
+    Loose check to see if nvprof failed, returns a boolean.
+
+    Check 1: nvprof failed, will only be 2 lines in the file.
+    Check 2: nvprof warnings, will be more than 3 lines at the beginning starting with '=='
+    """
+
     with open(profile_csv, 'r') as f:
+        equal_line_count = 0
         for i, line in enumerate(f):
+            if line.startswith("=="):
+                equal_line_count += 1
+                if equal_line_count > 3:
+                    return False    # check 2
             if i >= 5:
                 return True
-    return False
+    return False    # check 1
 
 
 def latest_file(path: Path, pattern: str = "*"):

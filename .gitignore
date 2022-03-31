@@ -1,6 +1,7 @@
 ignore/
 exe/
 profiles/
+presentation/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
