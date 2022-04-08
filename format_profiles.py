@@ -1,4 +1,5 @@
 import json
+from typing import Mapping, Union
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -156,7 +157,7 @@ def parse_one_profile(csv_file=None, example=False, gpu=0):
     return gpu_prof.append(system_prof)
 
 
-def parse_all_profiles(folder="profiles", save_filename=None, gpu=0, verbose=True):
+def parse_all_profiles(folder="profiles", save_filename=None, gpu=0, verbose=True) -> None:
     """
     Parses all of the profiles under the folder into one dataframe saved as a csv in the folder.
 
@@ -170,18 +171,9 @@ def parse_all_profiles(folder="profiles", save_filename=None, gpu=0, verbose=Tru
     :param verbose: print messages.
     :return: None, just saves a csv file.
     """
-    # todo validate class balance
 
-    # check that all profiles are valid
-    valid, _ = validate_profiles(folder, remove=False)
-    if not valid:
-        response = input(
-            "\n\n\nThere are invalid profiles.  Enter 'yes' to delete them.  "
-            "Then delete some valid profiles so that the number of profiles per model "
-            "is balanced.  An error will be raised either way.")
-        if response.lower() == 'yes':
-            _ = validate_profiles(folder, remove=True)
-        raise ValueError("Invalid profiles, fix before aggregating.")
+    # validate that no profiles are corrupt and that there is a class balance
+    validate_all(folder)
 
     root_folder = Path.cwd() / "profiles" / folder
     if not root_folder.exists():
@@ -209,7 +201,44 @@ def parse_all_profiles(folder="profiles", save_filename=None, gpu=0, verbose=Tru
     return
 
 
-def validate_profiles(folder, remove=False):
+def validate_all(folder: Path) -> None:
+    """
+    Validates 2 things:
+
+    (1) that nvprof did not fail on any profile.
+    (2) that there is the same number of profiles per class.
+
+    If either check fails, an error is raised. Also, the user will have the option to remove profiles
+    based on a response to a question in the console.
+
+    :param folder: the root folder which has subfolders organized by class (model architecture)
+    :return: None
+    """
+
+    # check that all profiles are valid
+    valid, _ = validate_profiles(folder, remove=False)
+    if not valid:
+        response = input(
+            "\n\n\nThere are invalid profiles.  Enter 'yes' to delete them, anything "
+            "else to keep them.  An error will be raised either way.  This error will "
+            "continue occuring until they are moved or deleted.")
+        if response.lower() == 'yes':
+            _ = validate_profiles(folder, remove=True)
+        raise ValueError("Invalid profiles, fix before aggregating.")
+
+    # check that classes are balanced
+    balanced = validate_class_balance(folder, remove=False)
+    if not balanced:
+        response = input(
+            "\n\n\nThere is a class imbalance. Enter 'yes' to delete extra profiles, "
+            "enter anything else to keep them.  An error will be raised either way. "
+            "This error will continue occuring until the classes are balanced.")
+        if response.lower() == 'yes':
+            _ = validate_class_balance(folder, remove=True)
+        raise ValueError("Class imbalance, fix before aggregating.")
+
+
+def validate_profiles(folder: Path, remove: bool=False) -> (bool, Mapping[str, Mapping[str, Union[int, list[str]]]]):
     """
     Checks all the profiles under ./profiles/<folder> to see if nvprof failed and lists them, optionally removing them.
 
@@ -252,7 +281,55 @@ def validate_profiles(folder, remove=False):
     return all_valid, invalid_profiles
 
 
-def read_csv(folder=None, gpu=0):
+def validate_class_balance(folder: Path, remove: bool=False) -> bool:
+    """
+    Checks all the profiles under ./profiles/<folder> to see if there is a class balance, optionally removing extras.
+
+    :param folder: the folder containing subfolders by model architecture, which contain profiles,
+                        such as ./profiles/<folder>/resnet/resnet12345.csv
+    :param remove: boolean whether or not to remove the files
+    :return: boolean indicating whether there is a class balance
+    """
+
+    print("Checking class balance ... ")
+
+    root_folder = Path.cwd() / "profiles" / folder
+    if not root_folder.exists():
+        raise FileNotFoundError(f"Folder {root_folder} does not exist.")
+
+    profiles = {}
+
+    for subdir in [x for x in root_folder.iterdir() if x.is_dir()]:
+        model = subdir.name
+        profiles[model] = {"num": 0, "profiles": []}
+        print(f"Parsing profiles for {model}")
+        for csv_profile in [x for x in subdir.iterdir()]:
+            profiles[model]["num"] += 1
+            profiles[model]["profiles"].append(csv_profile)
+
+    model_counts = [profiles[model]["num"] for model in profiles]
+    balance = len(model_counts) == model_counts.count(model_counts[0])
+
+    if balance:
+        print("Classes are balanced!\n\n")
+    else:
+        print("Classes are imbalanced!")
+        print(json.dumps({model: f"{profiles[model]['num']} profiles" for model in profiles}, indent=4))
+
+    if remove:
+        keep = min(model_counts)
+        for model in profiles:
+            count = profiles[model]["num"]
+            need_to_remove = count - keep
+            if need_to_remove > 0:
+                for i in range(need_to_remove):
+                    file = profiles[model]["profiles"][i]
+                    print(f"Removing {file}")
+                    file.unlink()
+    return balance
+
+
+def read_csv(folder: Path=None, gpu: int=0) -> pd.DataFrame:
     """
     Reads the aggregated csv data from the folder.  If the aggregated csv does not exist, creates it.
 
@@ -270,4 +347,4 @@ def read_csv(folder=None, gpu=0):
 
 
 if __name__ == '__main__':
-    a = parse_all_profiles("debug_profiles")
+    a = parse_all_profiles("debug_2")

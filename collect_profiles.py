@@ -9,6 +9,8 @@ import shlex
 import time
 import random
 
+import config
+
 
 def check_profile(profile_csv):
     """
@@ -31,12 +33,14 @@ def check_profile(profile_csv):
 
 
 def latest_file(path: Path, pattern: str = "*"):
+    """Return the latest file in the folder <path>"""
     # source https://stackoverflow.com/questions/39327032/how-to-get-the-latest-file-in-a-folder
     files = path.glob(pattern)
     return max(files, key=lambda x: x.stat().st_ctime)
 
 
 def run_command(folder, command, model_type):
+    """Runs a command which is assumed to add a new profile to <folder>.  Then validate the profile."""
     output = subprocess.run(shlex.split(command), stdout=sys.stdout)
     profile_file = latest_file(folder)
     return check_profile(profile_file), profile_file
@@ -69,7 +73,8 @@ if __name__ == '__main__':
                         help="-1 for cpu, else number of gpu, default 0")
     parser.add_argument("-sleep", type=int, default=10, required=False,
                         help="how long to sleep in between models in seconds, default 10")
-    parser.add_argument("-input", type=str, help="Input type to pass to model.  Options are 'random', '0', or '1'.")
+    parser.add_argument("-input", type=str, help="Input type to pass to model. See construct_inputs.py")
+    parser.add_argument("-pretrained", action='store_true', help="Use a pretrained model")
     parser.add_argument("-seed", type=int, default=-1,
                         help="If random inputs are specified and this seed is given: "
                              "will generate the same inputs for every profile. "
@@ -90,9 +95,6 @@ if __name__ == '__main__':
     parser.add_argument("-nosave", action='store_true', help="do not save any traces, just debug.")
 
     args = parser.parse_args()
-
-    if args.input not in ["random", "0", "1"]:
-        raise ValueError(f"Provided -input argument {args.input} but valid options are 'random', '0', or '1'.")
 
     # create folder for these profiles
     subfolder = args.folder
@@ -125,7 +127,7 @@ if __name__ == '__main__':
     with open(file, 'w') as f:
         json.dump(save_args, f, indent=4)
 
-    for model in ['resnet', 'googlenet', 'mobilenetv3', 'vgg']:
+    for model in config.MODELS:
         model_folder = profile_folder / model
         model_folder.mkdir(parents=True, exist_ok=True)
         log_file_prefix = model_folder / model
@@ -148,10 +150,18 @@ if __name__ == '__main__':
 
             # sometimes nvprof fails, keep trying until it succeeds.
             success, file = run_command(model_folder, command, model)
+            retries = 0
             while not success:
                 print("\nNvprof failed, retrying ... \n")
+                time.sleep(10)
                 file.unlink()
                 success, file = run_command(model_folder, command, model)
+                retries += 1
+                if retries > 5:
+                    print("Reached 5 retries, exiting...")
+                    if args.nosave:
+                        shutil.rmtree(profile_folder)
+                    raise RuntimeError("Nvprof failed 5 times in a row.")
 
             elapsed_model_time = (time.time() - start) / 60 # in minutes
             avg_prof_time = elapsed_model_time / (i+1)

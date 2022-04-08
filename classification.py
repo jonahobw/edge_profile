@@ -38,4 +38,4 @@ def logistic_reg_rfe(agg_csv_folder=None):
     print(f"Logistic Regression acc: {acc}")
 
 if __name__ == '__main__':
-    logistic_reg(system_data_only=True, no_system_data=False)
+    logistic_reg(system_data_only=False, no_system_data=False)
