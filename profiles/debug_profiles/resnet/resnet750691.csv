@@ -57,17 +57,17 @@ API calls,0.000013,0.001185,1,1.185,1.185,0.001185,cudaDeviceGetStreamPriorityRa
 API calls,0.00001,0.00089,1,0.89,0.89,0.00089,cudaUnbindTexture
 API calls,0.000009,0.000838,4,0.209,0.117,0.000396,cudaGetDeviceCount
 API calls,0.000004,0.000391,2,0.195,0.189,0.000202,cuDeviceGetUuid
-,,,,,,,
+
 ==750691== System profiling result:,,,,,,,
-,Device,Count,Avg,Min,Max,,
-SM Clock (MHz),Quadro RTX 8000 (0),94,1383.351064,300,1395,,
-Memory Clock (MHz),Quadro RTX 8000 (0),94,6435.159574,405,6500,,
-Temperature (C),Quadro RTX 8000 (0),187,39.165775,38,40,,
-Power (mW),Quadro RTX 8000 (0),187,61716.44385,26236,62849,,
-Fan (%),Quadro RTX 8000 (0),94,33,33,33,,
-SM Clock (MHz),Quadro RTX 8000 (1),94,300,300,300,,
-Memory Clock (MHz),Quadro RTX 8000 (1),94,405,405,405,,
-Temperature (C),Quadro RTX 8000 (1),187,44,44,44,,
-Power (mW),Quadro RTX 8000 (1),187,29967.81283,29783,30255,,
-Fan (%),Quadro RTX 8000 (1),94,33,33,33,,
+,Device,Count,Avg,Min,Max
+SM Clock (MHz),Quadro RTX 8000 (0),94,1383.351064,300,1395
+Memory Clock (MHz),Quadro RTX 8000 (0),94,6435.159574,405,6500
+Temperature (C),Quadro RTX 8000 (0),187,39.165775,38,40
+Power (mW),Quadro RTX 8000 (0),187,61716.44385,26236,62849
+Fan (%),Quadro RTX 8000 (0),94,33,33,33
+SM Clock (MHz),Quadro RTX 8000 (1),94,300,300,300
+Memory Clock (MHz),Quadro RTX 8000 (1),94,405,405,405
+Temperature (C),Quadro RTX 8000 (1),187,44,44,44
+Power (mW),Quadro RTX 8000 (1),187,29967.81283,29783,30255
+Fan (%),Quadro RTX 8000 (1),94,33,33,33
 ==750691== Warning: Some profiling data are not recorded. Make sure cudaProfilerStop() or cuProfilerStop() is called before application exit to flush profile data.,,,,,,,

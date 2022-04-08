@@ -1,4 +1,3 @@
--   when validating add a check for nans in the data.
 -   figure out where nan columns such as "avg_us_nan" come from in aggregated csv (zero_noexe as example)
 -   implement recursive feature selection
 -   implement different classification schemes, maybe one of them can get more accuracy on system data only.

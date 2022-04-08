@@ -41,6 +41,7 @@ def latest_file(path: Path, pattern: str = "*"):
 
 def run_command(folder, command, model_type):
     """Runs a command which is assumed to add a new profile to <folder>.  Then validate the profile."""
+    # should be a blocking call, so the latest file is valid.
     output = subprocess.run(shlex.split(command), stdout=sys.stdout)
     profile_file = latest_file(folder)
     return check_profile(profile_file), profile_file
@@ -157,7 +158,7 @@ if __name__ == '__main__':
             while not success:
                 print("\nNvprof failed, retrying ... \n")
                 time.sleep(10)
-                file.unlink()
+                latest_file(model_folder).unlink()
                 success, file = run_command(model_folder, command, model)
                 retries += 1
                 if retries > 5:
@@ -170,7 +171,7 @@ if __name__ == '__main__':
             avg_prof_time = elapsed_model_time / (i+1)
             est_time = (args.i - i + 1) * avg_prof_time
             print(
-                f"Average {str(avg_prof_time)[:4]}s per profile on {model}, "
+                f"Average {str(avg_prof_time)[:4]}mins per profile on {model}, "
                 f"estimated time left {str(est_time)[:4]} mins"
             )
 
