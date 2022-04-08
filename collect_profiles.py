@@ -146,7 +146,7 @@ if __name__ == '__main__':
 
             command = f"nvprof --csv --log-file {log_file_prefix}%p.csv --system-profiling on " \
                       f"--profile-child-processes {executable} -gpu {args.gpu} -model {model} -seed {seed} " \
-                      f"-n {args.n} -input {args.input}"
+                      f"-n {args.n} -input {args.input} -pretrained {args.pretrained}"
 
             # sometimes nvprof fails, keep trying until it succeeds.
             success, file = run_command(model_folder, command, model)

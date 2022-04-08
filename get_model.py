@@ -14,8 +14,8 @@ shufflenet = "shufflenet", ['shufflenet_v2_x0_5', 'shufflenet_v2_x1_0', 'shuffle
 model_families = [alexnet, resnet, vgg, squeezenet, densenet, googlenet, mobilenet, mnasnet, shufflenet]
 
 name_to_family = {}
-for family, models in model_families:
-    for model in models:
+for family, family_models in model_families:
+    for model in family_models:
         name_to_family[model] = family
 
 def get_model(model_arch:str, pretrained=False):
