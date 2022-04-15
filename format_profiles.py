@@ -4,6 +4,27 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from collect_profiles import check_profile
+from get_model import name_to_family
+
+
+def add_model_family(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adds a 'model_family' column to the dataframe based on the 'model' column.
+
+    Example:
+    wide_resnet50   -> resnet
+    vgg13_bn        -> vgg
+    densenet201     -> densenet
+
+    :param df: the dataframe to add the column to.  Must have a column called 'model'
+    :return: the original dataframe with the new column.
+    """
+
+    def label_family(row):
+        return name_to_family[row["model"]]
+
+    df["model_family"] = df.apply(label_family, axis=1)
+    return df
 
 
 def check_for_nans(profile_csv, gpu=0) -> list[str]:
@@ -29,7 +50,6 @@ def check_for_nans(profile_csv, gpu=0) -> list[str]:
     null_cols.extend(null_system_cols)
 
     return null_cols
-
 
 
 def parse_one_aggregate_profile(csv_file=None, example=False, nrows=None, skiprows=3):
@@ -224,8 +244,7 @@ def parse_all_profiles(folder="profiles", save_filename=None, gpu=0, verbose=Tru
 
     save_path = root_folder / save_filename
 
-    # todo add the model family column
-
+    combined = add_model_family(combined)
     combined.to_csv(save_path, index=False)
     return
 
@@ -433,7 +452,7 @@ def read_csv(folder: Path=None, gpu: int=0) -> pd.DataFrame:
 if __name__ == '__main__':
     # a = parse_all_profiles("debug_2")
     # validate_nans("zero_noexe")
-    # parse_all_profiles("zero_noexe_lots_models")
+    parse_all_profiles("zero_noexe_lots_models")
     # validate_nvprof("zero_noexe_lots_models")
     # validate_class_balance("zero_noexe_lots_models")
     exit(0)

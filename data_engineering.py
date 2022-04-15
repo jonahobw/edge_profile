@@ -2,6 +2,7 @@ from pathlib import Path
 import pandas as pd
 from format_profiles import read_csv
 import config
+import json
 
 
 def missing_data(aggregated_csv_folder):
@@ -129,6 +130,7 @@ def shared_data(agg_csv_folder, system_data_only=False, no_system_data=False):
 
     if system_data_only:
         system_cols.append('model')
+        system_cols.append('model_family')
         system_cols.append('file')
         return df[system_cols]
 
@@ -153,16 +155,26 @@ def train_test_split(df, ratio=0.8):
     return train_df, test_df
 
 
-def get_data_and_labels(df, shuffle=True):
+def get_data_and_labels(df, shuffle=True, label=None):
     """Splits a dataframe into data points and their associated labels (model)."""
     if shuffle:
         df = df.sample(frac=1)
-    df = df.drop("file", axis=1)
-    y = df["model"]
-    x = df.drop("model", axis=1)
+
+    if not label:
+        y = df["model"]
+    else:
+        y = df[label]
+
+    x = df.drop("file", axis=1)
+    x = x.drop("model_family", axis=1)
+    x = x.drop("model", axis=1)
+
     return x, y
 
 
 if __name__ == '__main__':
-    test = shared_data("zero_noexe", system_data_only=True)
-    print(test)
+    # test = shared_data("zero_noexe", system_data_only=True)
+    # print(test)
+    test = mutually_exclusive_data("zero_noexe_lots_models")
+    print(json.dumps(test, indent=4))
+    exit(0)
