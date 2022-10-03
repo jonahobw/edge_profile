@@ -1,6 +1,9 @@
 -   figure out where nan columns such as "avg_us_nan" come from in aggregated csv (zero_noexe as example)
+-   get rid of redundant indicator columns, because indicator will be the same for min, max, etc.
 -   implement recursive feature selection
 -   implement different classification schemes, maybe one of them can get more accuracy on system data only.
 -   experiment with pretrained vs not.
+-   add column for number of inferences and input type
+-   create script to collect multiple input types
 -   deploy on jetson nano
 -   try with different frameworks, like tflite

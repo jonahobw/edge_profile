@@ -1,8 +1,41 @@
 from pathlib import Path
+
+import numpy as np
 import pandas as pd
 from format_profiles import read_csv
 import config
 import json
+
+
+def remove_cols(df: pd.DataFrame, substrs: list, endswith: bool = False, verbose=False):
+    """Removes columns of the dataframe which include (or end with) any of the substrings."""
+
+    if not isinstance(substrs, list):
+        substrs = [substrs]
+
+    def remove_col(col_name: str):
+        for substr in substrs:
+            if not endswith and substr in col_name:
+                return True
+            if endswith and col_name.endswith(substr):
+                return True
+        return False
+
+    remove_cols = [col_name for col_name in df.columns if remove_col(col_name)]
+
+    if verbose:
+        print("\nRemoving columns:")
+        for i in remove_cols:
+            print(i)
+
+    return df.drop(remove_cols, axis=1)
+
+
+def get_csv(aggregated_csv_folder, remove_nans=True):
+    df = read_csv(aggregated_csv_folder)
+    if remove_nans:
+        df = remove_cols(df, "nan", verbose=True)
+    return df
 
 
 def missing_data(aggregated_csv_folder):
@@ -12,7 +45,7 @@ def missing_data(aggregated_csv_folder):
     :param aggregated_csv_folder: path to the folder under ./profiles/ which contains the aggregated.csv file.
     :return: A dict keyed by model with the columns with missing data and the number of missing datapoints.
     """
-    df = read_csv(aggregated_csv_folder)
+    df = get_csv(aggregated_csv_folder)
     model_nans = {}
 
     for model in df["model"].unique():
@@ -113,7 +146,7 @@ def shared_data(agg_csv_folder, system_data_only=False, no_system_data=False):
     if system_data_only and no_system_data:
         raise ValueError("system_data_only and no_system_data cannot both be true.")
 
-    df = read_csv(agg_csv_folder)
+    df = get_csv(agg_csv_folder)
     complete_attributes = mutually_exclusive_data(agg_csv_folder)["complete_attributes"]
     df = df[complete_attributes]    # only consider complete data
 
@@ -172,9 +205,88 @@ def get_data_and_labels(df, shuffle=True, label=None):
     return x, y
 
 
+def add_indicator_columns(df):
+    """
+    For any column that includes NaNs, add a binary indicator column.
+    Missing values are replaced by the mean.
+
+    Since GPU data is split into 6 features (min, max, avg, num_calls, time_ms, time_percent),
+    only 1 indicator column will be added for each of these 6 features.
+    """
+    completed = []
+    prefixes = ['min_', 'max_', 'avg_', 'num_calls_', 'time_ms_', 'time_percent_']
+    #todo finish this feature of only adding 1 indicator per feature (see docstring)
+    for col in df.columns:
+        column = df[col]
+        if column.isna().sum() > 0:
+            indicator_col = column.notna().astype(int)
+            indicator_col.name = f"indicator_{col}"
+            mean = column.mean()
+            df[col] = df[col].fillna(mean)
+            df = pd.concat([df, indicator_col], axis=1)
+        if df[col].isna().sum() > 0:
+            raise RuntimeError(f"Still NaNs in column {col}")
+    return df
+
+
+def all_data(agg_csv_folder, system_data_only=False, no_system_data=False, indicators_only=False):
+    """
+    Return a dataframe containing all features.  Creates indicator columns for incomplete
+    features, and fills NaNs with the mean of that feature.
+
+    :param agg_csv_folder: the folder under ./profiles/ where the aggregated csv lives.
+    :param system_data_only: If true, only return system data (clock, temp, power, fan).
+    :param no_system_data: if true, excludes system data.
+    :param indicators_only: only return indicator columns
+    :return: a dataframe
+    """
+    if system_data_only and no_system_data:
+        raise ValueError("system_data_only and no_system_data cannot both be true.")
+
+    df = get_csv(agg_csv_folder)
+
+    df = add_indicator_columns(df)
+
+    if indicators_only and system_data_only:
+        raise ValueError
+
+    if indicators_only:
+        indicator_cols = [col for col in df.columns if col.startswith("indicator")]
+        indicator_cols.append('model')
+        indicator_cols.append('model_family')
+        indicator_cols.append('file')
+        return df[indicator_cols]
+
+    if not system_data_only and not no_system_data:
+        return df
+
+    def system_column(col):
+        for sys_signal in config.SYSTEM_SIGNALS:
+            if col.endswith(sys_signal):
+                return True
+        return False
+
+    system_cols = [col_name for col_name in df.columns if system_column(col_name)]
+
+    if system_data_only:
+        system_cols.append('model')
+        system_cols.append('model_family')
+        system_cols.append('file')
+        return df[system_cols]
+
+    # else no_system_data is true
+    return df.drop(system_cols, axis=1)
+
+
 if __name__ == '__main__':
     # test = shared_data("zero_noexe", system_data_only=True)
     # print(test)
     test = mutually_exclusive_data("zero_noexe_lots_models")
     print(json.dumps(test, indent=4))
+    all_data("zero_noexe_lots_models")
+    # test = mutually_exclusive_data("zero_noexe")
+    # print(json.dumps(test, indent=4))
+
+    # test = missing_data("debug_profiles")
+    # print(test)
     exit(0)
