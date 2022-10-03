@@ -1,3 +1,7 @@
+"""
+Runs N inferences on a model A (maybe pretrained) on GPU K with inputs X.
+This file is turned into an executable and profiling is enabled while running the executable.
+"""
 import argparse
 import torch
 

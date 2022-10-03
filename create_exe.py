@@ -1,3 +1,7 @@
+"""
+Creates an exe based on model_inference.py for your OS.
+This is the exe file that can be used for profiling one inference.
+"""
 import sys
 import shutil
 import os

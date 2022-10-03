@@ -1,3 +1,8 @@
+"""
+Takes cleaned profile data and runs classifiers on it to predict model architecture.
+
+Currently supports logistic regression and neural net.
+"""
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline

@@ -1,3 +1,6 @@
+"""
+Configuration of profile collection and model construction.
+"""
 from get_model import name_to_family
 
 

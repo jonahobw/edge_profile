@@ -1,3 +1,7 @@
+"""
+Implements a fully connected N-layer neural network.
+Capability for training with decreasing learning rate.
+"""
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -57,7 +61,7 @@ class Net(torch.nn.Module):
         :param x: the data to normalize
         :param fit: whether or not to fit the scaler with this data's mean and std.  Should be true for
                 the training data and false for the test data.
-        :return: nor,alized data
+        :return: normalized data
         """
         if fit:
             # set the scaler

@@ -1,3 +1,7 @@
+"""
+Generates an input to feed to a model.  Seed can be specified for random inputs.
+Configuration of input size comes from config.py
+"""
 import config
 import torch
 

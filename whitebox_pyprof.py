@@ -1,3 +1,4 @@
+"""Uses pyprof to profile in white box setting."""
 import argparse
 
 import torch

@@ -1,5 +1,10 @@
+"""
+Aggregates nvprof profile data into one csv file.
+Also has capability to validate nvprof success and class balance.
+"""
+
 import json
-from typing import Mapping, Union
+from typing import Mapping, Tuple, Union
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -298,7 +303,7 @@ def validate_all(folder: Path) -> None:
         raise ValueError("Class imbalance, fix before aggregating.")
 
 
-def validate_nvprof(folder: Path, remove: bool=False) -> (bool, Mapping[str, Mapping[str, Union[int, list[str]]]]):
+def validate_nvprof(folder: Path, remove: bool=False) -> Tuple[bool, Mapping[str, Mapping[str, Union[int, list[str]]]]]:
     """
     Checks all the profiles under ./profiles/<folder> to see if nvprof failed and lists them, optionally removing them.
 
@@ -389,7 +394,7 @@ def validate_class_balance(folder: Path, remove: bool=False) -> bool:
     return balance
 
 
-def validate_nans(folder: Path, remove: bool=False) -> (bool, Mapping[str, Mapping[str, Union[int, list[str]]]]):
+def validate_nans(folder: Path, remove: bool=False) -> Tuple[bool, Mapping[str, Mapping[str, Union[int, list[str]]]]]:
     """
     Checks all the profiles under ./profiles/<folder> to see if they include NaNs and lists them.
 

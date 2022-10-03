@@ -1,3 +1,9 @@
+"""
+Runs an executable to generate and save profiles.
+
+Some parameters come from command line and some from config.py.  TODO - make everything come from config.
+"""
+
 import json
 import os
 import shutil
