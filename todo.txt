@@ -1,9 +1,32 @@
 -   figure out where nan columns such as "avg_us_nan" come from in aggregated csv (zero_noexe as example)
 -   get rid of redundant indicator columns, because indicator will be the same for min, max, etc.
 -   implement recursive feature selection
--   implement different classification schemes, maybe one of them can get more accuracy on system data only.
--   experiment with pretrained vs not.
 -   add column for number of inferences and input type
 -   create script to collect multiple input types
 -   deploy on jetson nano
+
 -   try with different frameworks, like tflite
+-   implement different classification schemes, maybe one of them can get more accuracy on system data only.
+-   experiment with pretrained vs not.
+-   code different input types, like checkered, snake, and actual data from distribution.
+-   does the dataset of the profiled models matter?  train offline with models trained using different datasets,
+    then online prediction using victim model trained on other dataset?
+    -   This is really just testing if the weights of the network affect profile.  I could try extreme cases of
+        different initializations of the weights at 0, 1, high values, or low values.
+-   DO THE INPUTS THAT I FEED DURING PROFILING (SUCH AS ALL 1'S)  NEED TO BE TRANSFORMED FIRST?
+
+Low priority:
+-   does clustering profiles result in model family segmentation?  Can this be done using only system data?
+
+
+-------------------------------------------------------------
+Results to generate:
+
+-   model architecture prediction accuracy on {all data, system data only, gpu data only, recursive feature selection} 
+    by model type (logistic regression, neural net, other??)
+    -   by type of input, number of inferences, time to sleep between inferences, 
+        pretrained vs not (would rather have deterministic cases so maybe only have trained), exe vs not
+-   using different attacks, compare attack success using different surrogate model architectures vs the predicted
+    architecture
+-   some metric to define how close two models are.
+-   relationship between power side channel and activation function

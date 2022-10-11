@@ -1,6 +1,7 @@
 """
 Implements a fully connected N-layer neural network.
 Capability for training with decreasing learning rate.
+Used for predicting the model architecture from gpu profiles
 """
 import torch
 from torch import nn
