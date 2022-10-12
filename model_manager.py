@@ -241,8 +241,9 @@ class ModelManager:
     def runNVProf(self, use_exe: bool=True, seed: int=47, n: int=10, input: str="0"):
         profile_folder = self.path / "profiles"
         profile_folder.mkdir()
+        prefix = profile_folder / "profile_"
         executable = generateExeName(use_exe)
-        command = f"nvprof --csv --log-file {profile_folder}profile.csv --system-profiling on " \
+        command = f"nvprof --csv --log-file {prefix}%p.csv --system-profiling on " \
             f"--profile-child-processes {executable} -gpu {self.gpu} -load_path {self.path/'checkpoint.pt'}"\
             f" -seed {seed} -n {n} -input {input}"
         
