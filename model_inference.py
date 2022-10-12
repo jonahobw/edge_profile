@@ -7,6 +7,7 @@ import torch
 
 from construct_input import construct_input
 from get_model import get_model
+from model_manager import ModelManager
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-model", type=str, default="resnet", required=False)
@@ -18,10 +19,17 @@ parser.add_argument("-input", type=str, default="random",
                     help="Input type to pass to model. See construct_inputs.py")
 parser.add_argument("-seed", type=int, default=42, help="Random seed for random inputs.")
 parser.add_argument("-pretrained", action='store_true', help="Use a pretrained model")
+parser.add_argument("-load_path", default=None, required=False, help="Provide a path to a model to be used.")
+
 
 args = parser.parse_args()
 
-model = get_model(args.model, pretrained=args.pretrained)
+model = None
+if args.load_path:
+    gpu = args.gpu if args.gpu >=0 else None
+    model = ModelManager.load(args.load_path, gpu).model
+else:
+    model = get_model(args.model, pretrained=args.pretrained)
 
 device = torch.device("cpu")
 dev_name = "cpu"

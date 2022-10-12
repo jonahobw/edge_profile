@@ -45,7 +45,7 @@ def latest_file(path: Path, pattern: str = "*"):
     return max(files, key=lambda x: x.stat().st_ctime)
 
 
-def run_command(folder, command, model_type):
+def run_command(folder, command):
     """Runs a command which is assumed to add a new profile to <folder>.  Then validate the profile."""
     # should be a blocking call, so the latest file is valid.
     output = subprocess.run(shlex.split(command), stdout=sys.stdout)
@@ -68,6 +68,19 @@ def run_command_popen(folder, command, model_type):
     if not profile_file.exists():
         raise FileNotFoundError(f"File {profile_file} does not exist and cannot be validated.")
     return check_profile(profile_file), profile_file
+
+
+def generateExeName(use_exe: bool) -> str:
+    if os.name != 'nt':
+        system = "linux"
+    else:
+        system = "windows"
+    executable = f"exe/{system}/{system}_inference.exe"
+    if use_exe:
+        # use python file instead
+        executable = "python model_inference.py"
+    return executable
+
 
 if __name__ == '__main__':
 
@@ -115,14 +128,7 @@ if __name__ == '__main__':
     i_seeds = [random.randint(0, 999999) for i in range(args.i)]
 
     # file to execute
-    if os.name != 'nt':
-        system = "linux"
-    else:
-        system = "windows"
-    executable = f"exe/{system}/{system}_inference.exe"
-    if args.noexe:
-        # use python file instead
-        executable = "python model_inference.py"
+    executable = generateExeName(not args.noexe)
 
     # save arguments to json file
     file = profile_folder / "arguments.json"
@@ -159,7 +165,7 @@ if __name__ == '__main__':
                 command += " -pretrained"
 
             # sometimes nvprof fails, keep trying until it succeeds.
-            success, file = run_command(model_folder, command, model)
+            success, file = run_command(model_folder, command)
             retries = 0
             while not success:
                 print("\nNvprof failed, retrying ... \n")

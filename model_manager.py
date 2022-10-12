@@ -19,6 +19,7 @@ from datasets import Dataset
 from logger import CSVLogger
 from online import OnlineStats
 from accuracy import correct, accuracy
+from collect_profiles import run_command, generateExeName
 
 
 class ModelManager:
@@ -57,13 +58,14 @@ class ModelManager:
         self.device = torch.device("cpu")
         if gpu is not None and torch.cuda.is_available():
             self.device = torch.device(f"cuda:{gpu}")
+        self.gpu = -1 if not gpu else gpu
         print(f"Using device {self.device}, cuda available: {torch.cuda.is_available()}")
         self.model = self.constructModel()
         self.trained = False
         if load:
             self.trained = True
             self.path = load
-            self.loadModel(load)
+            self.loadModel()
         else:
             self.path = self.generateFolder()
         self.config = {
@@ -75,15 +77,26 @@ class ModelManager:
         }
         self.epochs = 0
 
+    @staticmethod
+    def load(model_path: Path, gpu=None):
+        """Create a ModelManager Object from a path to a model file."""
+        folder_path = model_path.parent
+        config = folder_path.glob("params_*")
+        with open(next(config), "r") as f:
+            conf = json.load(f)
+        model_manager = ModelManager(conf["architecture"], conf["dataset"], conf["model_name"], load=folder_path, gpu=gpu)
+        model_manager.loadModel()
+        return model_manager
+
     def loadModel(self) -> None:
         """
         Models are stored under
         ./models/model_architecture/{self.name}{unique_string}/checkpoint.pt
         """
         model_file = self.path / "checkpoint.pt"
-        assert model_file.exists(), "Model load path does not exist."
+        assert model_file.exists(), f"Model load path \n{model_file}\n does not exist."
         params = torch.load(model_file, map_location=self.device)
-        self.model.load_state_dict(params["model_state_dict"], strict=False)
+        self.model.load_state_dict(params, strict=False)
         self.model.eval()
     
     def saveModel(self) -> None:
@@ -109,6 +122,9 @@ class ModelManager:
         Returns:
             Nothing, only sets the self.model class variable.
         """
+        if self.trained:
+            raise ValueError
+        
         self.epochs = num_epochs
         logger = CSVLogger(self.path, self.train_metrics)
 
@@ -222,6 +238,31 @@ class ModelManager:
         model_folder.mkdir(parents=True)
         return model_folder
     
+    def runNVProf(self, use_exe: bool=True, seed: int=47, n: int=10, input: str="0"):
+        profile_folder = self.path / "profiles"
+        profile_folder.mkdir()
+        executable = generateExeName(use_exe)
+        command = f"nvprof --csv --log-file {profile_folder}profile.csv --system-profiling on " \
+            f"--profile-child-processes {executable} -gpu {self.gpu} -load_path {self.path/'checkpoint.pt'}"\
+            f" -seed {seed} -n {n} -input {input}"
+        
+        success, file = run_command(profile_folder, command)
+        retries = 0
+        while not success:
+            print("\nNvprof failed, retrying ... \n")
+            time.sleep(10)
+            latest_file(model_folder).unlink()
+            success, file = run_command(profile_folder, command)
+            retries += 1
+            if retries > 5:
+                print("Reached 5 retries, exiting...")
+                break
+        params = {"use_exe": use_exe, "seed": seed, "n": n, "input": input, "success": success}
+        with open(profile_folder / "params.json", "w") as f:
+            json.dump(params, f)
+        if not success:
+            raise RuntimeError("Nvprof failed 5 times in a row.")
+
     @property
     def train_metrics(self) -> list:
         """Generate the training metrics to be logged to a csv."""
@@ -294,4 +335,9 @@ def trainAllVictimModels(epochs=150, gpu = None, reverse=False, debug=None):
     f.close()
 
 if __name__ == '__main__':
-    trainAllVictimModels(1, debug=2, reverse=True)
+    # trainAllVictimModels(1, debug=2, reverse=True)
+    p = Path.cwd() / "models" / "resnet18"
+    path = next(p.glob("*")) / "checkpoint.pt"
+    print(path)
+    a = ModelManager.load(path)
+    a.runNVProf()
