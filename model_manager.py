@@ -80,7 +80,7 @@ class ModelManager:
     @staticmethod
     def load(model_path: Path, gpu=None):
         """Create a ModelManager Object from a path to a model file."""
-        folder_path = model_path.parent
+        folder_path = Path(model_path).parent
         config = folder_path.glob("params_*")
         with open(next(config), "r") as f:
             conf = json.load(f)
@@ -243,6 +243,7 @@ class ModelManager:
         profile_folder.mkdir()
         prefix = profile_folder / "profile_"
         executable = generateExeName(use_exe)
+        print(f"Using executable {executable} for nvprof")
         command = f"nvprof --csv --log-file {prefix}%p.csv --system-profiling on " \
             f"--profile-child-processes {executable} -gpu {self.gpu} -load_path {self.path/'checkpoint.pt'}"\
             f" -seed {seed} -n {n} -input {input}"

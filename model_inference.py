@@ -39,7 +39,6 @@ if args.gpu >=0:
 
 inputs = construct_input(args.input, args.n, seed=args.seed)
 
-model = get_model(args.model)
 model.eval()
 model.to(device)
 inputs = inputs.to(device)
