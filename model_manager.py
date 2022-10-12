@@ -91,7 +91,7 @@ class ModelManager:
     def loadModel(self) -> None:
         """
         Models are stored under
-        ./models/model_architecture/{self.name}{unique_string}/checkpoint.pt
+        self.path/checkpoint.pt
         """
         model_file = self.path / "checkpoint.pt"
         assert model_file.exists(), f"Model load path \n{model_file}\n does not exist."
@@ -285,14 +285,17 @@ class SurrogateModelManager(ModelManager):
     model.
     """
 
-    def __init__(self, victim_model_arch: str, surrogate_model_predicted_arch: str):
-        self.victim_model = get_model(victim_model_arch, pretrained=True)
-        self.surrogate_model = get_model(
-            surrogate_model_predicted_arch, pretrained=False
-        )
+    def __init__(self, victim_model_path: str, gpu: int=None):
+        self.victim_model = ModelManager.load(victim_model_path, gpu=gpu)
+        architecture = self.predictVictimArch()
+        super().__init__(self, architecture, self.victim_model.dataset.name, gpu=gpu)
 
-    def normalizeInput(self, input):
+    def predictVictimArch():
+        # if victim hasn't been profiled, then run profile
         pass
+
+    def generateFolder(self) -> str:
+        return
 
 
 # def getPreds(inputs, model, grad=False):
@@ -336,13 +339,13 @@ def trainAllVictimModels(epochs=150, gpu = None, reverse=False, debug=None):
 
 def profileAllVictimModels(gpu=0):
     models_folder = Path.cwd() / "models"
-    arch_folders = models_folder.glob("*")
+    arch_folders = [i for i in models_folder.glob("*")]
     for arch in arch_folders:
-        for model_folder in arch:
+        for model_folder in [i for i in arch.glob("*")]:
             path = models_folder / arch / model_folder / "checkpoint.pt"
             model_manager = ModelManager.load(path, gpu=gpu)
             model_manager.runNVProf()
 
 if __name__ == '__main__':
     # trainAllVictimModels(1, debug=2, reverse=True)
-    pass
+    profileAllVictimModels()
