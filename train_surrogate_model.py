@@ -55,8 +55,9 @@ class ModelManager:
         self.dataset = Dataset(dataset)
         self.model_name = model_name
         self.device = torch.device("cpu")
-        if gpu and torch.cuda.is_available():
+        if gpu is not None and torch.cuda.is_available():
             self.device = torch.device(f"cuda:{gpu}")
+        print(f"Using device {self.device}, cuda available: {torch.cuda.is_available()}")
         self.model = self.constructModel()
         self.trained = False
         if load:
@@ -197,7 +198,7 @@ class ModelManager:
         if train and debug is None:
             lr_scheduler.step(loss)
             # get actual train accuracy/loss after weights update
-            top1, top5, loss = accuracy(model=self.model, dataloader=self.dataset.train_acc_dl, loss_func=self.loss_func, topk=(1, 5))
+            top1, top5, loss = accuracy(model=self.model, dataloader=self.dataset.train_acc_dl, loss_func=loss_fn, topk=(1, 5))
 
         return loss, top1, top5
 
