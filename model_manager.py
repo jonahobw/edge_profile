@@ -19,7 +19,7 @@ from datasets import Dataset
 from logger import CSVLogger
 from online import OnlineStats
 from accuracy import correct, accuracy
-from collect_profiles import run_command, generateExeName
+from collect_profiles import run_command, generateExeName, latest_file
 
 
 class ModelManager:
@@ -251,7 +251,7 @@ class ModelManager:
         while not success:
             print("\nNvprof failed, retrying ... \n")
             time.sleep(10)
-            latest_file(model_folder).unlink()
+            latest_file(profile_folder).unlink()
             success, file = run_command(profile_folder, command)
             retries += 1
             if retries > 5:
@@ -334,10 +334,15 @@ def trainAllVictimModels(epochs=150, gpu = None, reverse=False, debug=None):
             f.write(f"\n\n{model} failed, error\n{e}\n\n")
     f.close()
 
+def profileAllVictimModels(gpu=0):
+    models_folder = Path.cwd() / "models"
+    arch_folders = models_folder.glob("*")
+    for arch in arch_folders:
+        for model_folder in arch:
+            path = models_folder / arch / model_folder / "checkpoint.pt"
+            model_manager = ModelManager.load(path, gpu=gpu)
+            model_manager.runNVProf()
+
 if __name__ == '__main__':
     # trainAllVictimModels(1, debug=2, reverse=True)
-    p = Path.cwd() / "models" / "resnet18"
-    path = next(p.glob("*")) / "checkpoint.pt"
-    print(path)
-    a = ModelManager.load(path)
-    a.runNVProf()
+    pass

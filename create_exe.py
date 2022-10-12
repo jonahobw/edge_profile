@@ -17,7 +17,7 @@ def create_exe():
         # linux
         destination_folder = Path.cwd() / "exe" / "linux"
         if not destination_folder.exists():
-            destination_folder.mkdir(exist_ok=True)
+            destination_folder.mkdir(exist_ok=True, parents=True)
         destination = destination_folder / "linux_inference.exe"
         exe_file = Path.cwd() / "dist" / "model_inference"
     else:
