@@ -2,6 +2,11 @@ ignore/
 exe/
 profiles/
 presentation/
+model_extraction/
+models/
+datasets/
+train_progress*
+.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

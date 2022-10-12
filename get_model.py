@@ -18,8 +18,12 @@ for family, family_models in model_families:
     for model in family_models:
         name_to_family[model] = family
 
-def get_model(model_arch:str, pretrained=False):
+all_models = []
+for i in model_families:
+    all_models.extend(i[1])
+
+def get_model(model_arch:str, pretrained=False, model_kwargs={}):
     model_arch = model_arch.lower()
     if model_arch not in name_to_family:
         raise ValueError(f"Model {model_arch} not supported")
-    return getattr(models, model_arch)(pretrained=pretrained)
+    return getattr(models, model_arch)(pretrained=pretrained, **model_kwargs)
