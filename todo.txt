@@ -12,8 +12,11 @@
 -   does the dataset of the profiled models matter?  train offline with models trained using different datasets,
     then online prediction using victim model trained on other dataset?
     -   This is really just testing if the weights of the network affect profile.  I could try extreme cases of
-        different initializations of the weights at 0, 1, high values, or low values.
+        different initializations of the weights at 0, 1, high values, or low values.  However, if the input size
+        is different then this will affect it, different number of computations.
 -   DO THE INPUTS THAT I FEED DURING PROFILING (SUCH AS ALL 1'S)  NEED TO BE TRANSFORMED FIRST?
+-   Add support to provide the inputs for profiling directly from the dataloader/dataset (maybe link the dataset.py
+    class to the construct_input.py).
 
 Low priority:
 -   does clustering profiles result in model family segmentation?  Can this be done using only system data?

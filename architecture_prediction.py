@@ -9,9 +9,49 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.feature_selection import RFE
 from sklearn.metrics import f1_score
+import pandas as pd
 
-from data_engineering import shared_data, get_data_and_labels, all_data
+from data_engineering import shared_data, get_data_and_labels, all_data, add_indicator_cols_to_input
 from neural_network import Net
+
+class NNArchPred:
+
+    def __init__(self, df=None, label = "model"):
+        if not df:
+            df = all_data("zero_noexe_lots_models")
+        self.data = df
+        self.label = label
+        self.label_encoder = LabelEncoder()
+        all_x, all_y = get_data_and_labels(self.data, shuffle=False, label=label)
+        all_y_labeled = self.label_encoder.fit_transform(all_y)
+        x_tr, x_test, y_train, y_test = train_test_split(all_x, all_y_labeled, random_state=42)
+        self.x_tr = x_tr
+        self.x_test = x_test
+        self.y_train = y_train
+        self.y_test = y_test
+        self.num_classes = len(all_y.unique())
+        self.input_size = len(all_x.columns)
+        print(f"Instantiating neural net with {self.num_classes} classes and input size of {self.input_size}")
+        self.model = Net(input_size=self.input_size, num_classes=self.num_classes)
+        self.x_tr = self.model.normalize(self.x_tr, fit=True)
+        self.x_test = self.model.normalize(self.x_test)
+        self.model.train(self.x_tr, self.x_test, self.y_train, self.y_test)
+    
+    def preprocessInput(self, x: pd.Series):
+        x = add_indicator_cols_to_input(self.data, x)
+        x = x.drop("file")
+        x = x.drop("model_family")
+        x = x.drop("model")
+        return x
+    
+    def predict(self, x: pd.Series):
+        x = self.preprocessInput(x)
+        preds = self.model.get_preds(x)
+        #todo are they normalized to be confidence scores?
+        pred = preds.argmax()
+        conf = preds[pred]
+        label = self.label_encoder.inverse_transform(pred)
+        return label, conf
 
 
 def neural_net(agg_csv_folder=None, system_data_only=False, no_system_data=False, label=None, shared_data_only=True,

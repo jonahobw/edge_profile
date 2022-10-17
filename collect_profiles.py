@@ -76,7 +76,7 @@ def generateExeName(use_exe: bool) -> str:
     else:
         system = "windows"
     executable = f"exe/{system}/{system}_inference.exe"
-    if use_exe:
+    if not use_exe:
         # use python file instead
         executable = "python model_inference.py"
     return executable

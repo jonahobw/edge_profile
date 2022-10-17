@@ -236,6 +236,28 @@ def add_indicator_columns(df):
             raise RuntimeError(f"Still NaNs in column {col}")
     return df
 
+def add_indicator_cols_to_input(df, x: pd.Series):
+    """
+    For an input x, add indicator columns to x so that it has the same 
+    columns as df.  Replace missing values in x with mean.  Return
+    new x.
+    """
+    for col in df.columns:
+        if col not in x.keys():
+            if col.startswith("indicator_"):
+                original_name = col.split("indicator_")[1]
+                if original_name in x.keys():
+                    x[col] = 1
+                else:
+                    x[col] = 0
+            else:
+                x[col] = df[col].mean()
+    for i in x.keys():
+        if i not in df.columns:
+            x = x.drop(i)
+    return x
+
+
 
 def all_data(agg_csv_folder, system_data_only=False, no_system_data=False, indicators_only=False):
     """

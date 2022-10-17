@@ -4,12 +4,13 @@ Generic model training from Pytorch model zoo, used for the victim model.
 Assuming that the victim model architecture has already been found/predicted,
 the surrogate model can be trained using labels from the victim model.
 """
+from ast import Raise
 import datetime
 import json
 from operator import mod
 from pathlib import Path
 import time
-from typing import Callable
+from typing import Callable, Dict, Tuple
 
 import torch
 from tqdm import tqdm
@@ -20,6 +21,8 @@ from logger import CSVLogger
 from online import OnlineStats
 from accuracy import correct, accuracy
 from collect_profiles import run_command, generateExeName, latest_file
+from format_profiles import parse_one_profile
+from architecture_prediction import NNArchPred
 
 
 class ModelManager:
@@ -39,7 +42,7 @@ class ModelManager:
     ):
         """
         Models files are stored in a folder
-        ./models/model_architecture/{self.name}_{date_time}/
+        ./models/{model_architecture}/{self.name}_{date_time}/
 
         This includes the model file, a csv documenting training, and a config file.
 
@@ -47,9 +50,9 @@ class ModelManager:
             architecture (str): the exact string representation of the model architecture.
                 See get_model.py.
             dataset (str): the name of the dataset all lowercase.
-            model_name (str): The name of the model (don't use underscores).
+            model_name (str): The name of the model, can be anything except don't use underscores.
             load (str, optional): If provided, should be the absolute path to the model folder,
-                {cwd}/models/model_architecture/{self.name}{date_time}.  This will load the model
+                {cwd}/models/{model_architecture}/{self.name}{date_time}.  This will load the model
                 stored there.
         """
         self.architecture = architecture
@@ -85,7 +88,7 @@ class ModelManager:
         with open(next(config), "r") as f:
             conf = json.load(f)
         model_manager = ModelManager(conf["architecture"], conf["dataset"], conf["model_name"], load=folder_path, gpu=gpu)
-        model_manager.loadModel()
+        model_manager.config = conf
         return model_manager
 
     def loadModel(self) -> None:
@@ -218,10 +221,23 @@ class ModelManager:
 
         return loss, top1, top5
 
-    def saveConfig(self):
+    def saveConfig(self, args: dict = {}):
         """
-        Write parameters to a json file.
+        Write parameters to a json file.  If file exists already, then will be
+        appended to/overwritten.  If args are provided, they are added to the config file.
         """
+        self.config.update(args)
+        # look for config file
+        config_files = [x for x in self.path.glob("params_*")]
+        if len(config_files) > 1:
+            raise ValueError(f"Too many config files in path {self.path}")
+        if len(config_files) == 1:
+            with open(config_files[0], "r") as f:
+                conf = json.load(f)
+            conf.update(self.config)
+            with open(config_files[0], "w") as f:
+                json.dump(conf, f, indent=4)
+            return
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         path = self.path / f"params_{timestamp}.json"
         with open(path, "w") as f:
@@ -239,6 +255,12 @@ class ModelManager:
         return model_folder
     
     def runNVProf(self, use_exe: bool=True, seed: int=47, n: int=10, input: str="0"):
+        """
+        Creates a subfolder self.path/profiles, and adds a profile file profile_{pid}.csv and
+        associated params_{pid}.json file to this subfolder, if the profile succeeded.  
+        There is support for multiple profiles.  
+        Note - this function does not check for collisions in pid.
+        """
         profile_folder = self.path / "profiles"
         profile_folder.mkdir()
         prefix = profile_folder / "profile_"
@@ -259,11 +281,41 @@ class ModelManager:
             if retries > 5:
                 print("Reached 5 retries, exiting...")
                 break
-        params = {"use_exe": use_exe, "seed": seed, "n": n, "input": input, "success": success}
-        with open(profile_folder / "params.json", "w") as f:
-            json.dump(params, f)
         if not success:
+            latest_file(profile_folder).unlink()
             raise RuntimeError("Nvprof failed 5 times in a row.")
+        assert self.isProfiled()
+        profile_num = str(file.name).split("_")[1].split(".")[0]
+        params = {"file": str(file), "profile_number": profile_num, "use_exe": use_exe, "seed": seed, "n": n, "input": input, "success": success, "gpu": self.gpu}
+        with open(profile_folder / f"params_{profile_num}.json", "w") as f:
+            json.dump(params, f)
+
+    def isProfiled(self) -> bool:
+        """
+        Checks if the model has been profiled. Returns True if there
+        is a subfolder self.path/profiles with at least one profile_{pid}.csv
+        and associated params_{pid}.csv.
+        """
+        profile_folder = self.path / "profiles"
+        profile_config = [x for x in profile_folder.glob("params_*")]
+        assert len(profile_config) > 0
+        with open(profile_config[0], "r") as f:
+            conf = json.load(f)
+        profile_path = Path(conf["file"])
+        return profile_path.exists() and conf["success"]
+    
+    def getProfile(self) -> Tuple[Path, Dict]:
+        """
+        Return a tuple of (path to profile_{pid}.csv,
+        dictionary obtained from reading params_{pid}.json)
+        """
+        profile_folder = self.path / "profiles"
+        profile_config = [x for x in profile_folder.glob("params_*")]
+        assert len(profile_config) > 0
+        with open(profile_config[0], "r") as f:
+            conf = json.load(f)
+        profile_path = Path(conf["file"])
+        return profile_path, conf
 
     @property
     def train_metrics(self) -> list:
@@ -287,35 +339,129 @@ class SurrogateModelManager(ModelManager):
     model.
     """
 
-    def __init__(self, victim_model_path: str, gpu: int=None):
+    arch_model = {"nn": NNArchPred}
+
+    def __init__(self, victim_model_path: str, gpu: int=None, arch_model: str = "nn", load: dict={}):
+        """
+        If load is not none, it should be a dictionary containing the model architecture,
+        architecture prediction model type, architecture confidence, and path to model.
+        """
         self.victim_model = ModelManager.load(victim_model_path, gpu=gpu)
-        architecture = self.predictVictimArch()
-        super().__init__(self, architecture, self.victim_model.dataset.name, gpu=gpu)
+        load_path = None
+        if load:
+            self.arch_pred_model = load["arch_pred_model"]
+            architecture = load["architecture"]
+            self.arch_confidence = load["arch_confidence"]
+            load_path = Path(load["path"]) / "checkpoint.pt"
+        else:
+            self.arch_pred_model = None
+            architecture, conf = self.predictVictimArch(arch_model)
+            self.arch_confidence = conf
+        super().__init__(self, architecture, self.victim_model.dataset.name, gpu=gpu, load=load_path)
+        self.config.update({"arch_pred_model": arch_model, "arch_confidence": conf})
 
-    def predictVictimArch():
-        # if victim hasn't been profiled, then run profile
-        pass
+    def profileVictim(self, use_exe: bool=True, seed: int=47, n: int=10, input: str="0"):
+        """Not used, assume that victim model has already been profiled."""
+        #todo if victim hasn't been profiled, then run profile
+        if not self.victim_model.isProfiled():
+            self.victim_model.runNVProf(use_exe, seed, n, input)
+        return self.victim_model.getProfile()
 
+    def predictVictimArch(self, model_type:str):
+        profile_csv, config = self.self.victim_model.getProfile()
+        profile_features = parse_one_profile(profile_csv, gpu=config["gpu"])
+        print(f"Training architecture prediction model {model_type}")
+        self.arch_pred_model = self.arch_model[model_type]()
+        arch, conf = self.arch_pred_model.predict(profile_features)
+        return arch, conf
+
+    def load(model_path: str, gpu=None):
+        """
+        Given a path to a surrogate model, load into a SurrogateModelManager obj.
+        Surrogate models are stored in {victim_model_path}/surrogate/checkpoint.pt
+        """
+        surrogate_folder = Path(model_path).parent
+        victim_model_path = surrogate_folder.parent / "checkpoint.pt"
+        surrogate_config = surrogate_folder.glob("params_*")
+        with open(next(surrogate_config), "r") as f:
+            conf = json.load(f)
+        surrogate_manager = SurrogateModelManager(victim_model_path, gpu, load=conf)
+        surrogate_manager.config.update(conf)
+        return surrogate_manager
+        
     def generateFolder(self) -> str:
-        return
+        folder = self.victim_model.path / "surrogate"
+        folder.mkdir()
+        return folder
 
+    def trainSaveAll(self, num_epochs: int, lr: float=1e-3, debug: int = None):
+        """Wrapper around trainModel to add some more config data."""
+        self.trainModel(num_epochs, lr, debug)
+        self.config["victim_config"] = self.victim_model.config
+        self.saveConfig()
 
-# def getPreds(inputs, model, grad=False):
-#     """
-#     Returns predictions from the model on the inputs.
-#     """
-#     normalized_inputs = normalize(x)
-#     with torch.set_grad_enabled(grad):
-#         output = self(x_normalized)
-#     return torch.squeeze(output)
+    def runEpoch(self, train: bool, epoch: int, optim: torch.optim.Optimizer, val_loss: Callable, lr_scheduler: torch.optim.lr_scheduler._LRScheduler, debug:int = None) -> tuple[int]:
+        """
+        Run a single epoch.  
+        Uses L1 loss between vitim model predictions and surrogate model predictions.
+        Accuracy is still computed on the original validation set.
+        """
 
+        self.model.eval()
+        prefix = "val"
+        dl = self.dataset.val_dl
+        if train:
+            self.model.train()
+            prefix = "train"
+            dl = self.dataset.train_dl
+        train_loss = torch.nn.L1Loss()
+            
+        total_loss = OnlineStats()
+        acc1 = OnlineStats()
+        acc5 = OnlineStats()
+        step_size = OnlineStats()
 
-# def surrogateTrainingLoss(inputs, surrogate_preds, victim_model: torch.nn.Module):
-#     """
-#     Given a list of predictions from the surrogate model, return the loss
-#     as if the labels were the predictions from the victim model.
-#     """
-#     victim_preds = getPreds(inputs, victim_model)
+        epoch_iter = tqdm(dl)
+        epoch_iter.set_description(f"{prefix.capitalize()} Epoch {epoch if train else '1'}/{self.epochs if train else '1'}")
+
+        with torch.set_grad_enabled(train):
+            for i, (x, y) in enumerate(epoch_iter, start=1):
+                if debug and i > debug:
+                    break
+                x, y = x.to(self.device), y.to(self.device)
+                victim_yhat = self.victim_model.model(x)
+                victim_yhat = torch.Variable(victim_yhat, requires_grad=False)
+                yhat = self.model(x)
+                if train:
+                    loss = train_loss(yhat, victim_yhat)
+                    loss.backward()
+                    optim.step()
+                    optim.zero_grad()
+                else:
+                    loss = val_loss(yhat, y)
+                
+                c1, c5 = correct(yhat, y, (1, 5))
+                total_loss.add(loss.item() / len(x))
+                acc1.add(c1 / len(x))
+                acc5.add(c5 / len(x))
+
+                epoch_iter.set_postfix(
+                    loss=total_loss.mean,
+                    top1=acc1.mean,
+                    top5=acc5.mean,
+                    step_size=step_size.mean,
+                )
+
+        loss = total_loss.mean
+        top1 = acc1.mean
+        top5 = acc5.mean
+
+        if train and debug is None:
+            lr_scheduler.step(loss)
+            # get actual train accuracy/loss after weights update
+            top1, top5, loss = accuracy(model=self.model, dataloader=self.dataset.train_acc_dl, loss_func=val_loss, topk=(1, 5))
+
+        return loss, top1, top5
 
 
 def trainAllVictimModels(epochs=150, gpu = None, reverse=False, debug=None):
