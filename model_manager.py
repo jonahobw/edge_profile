@@ -61,7 +61,7 @@ class ModelManager:
         self.device = torch.device("cpu")
         if gpu is not None and torch.cuda.is_available():
             self.device = torch.device(f"cuda:{gpu}")
-        self.gpu = -1 if not gpu else gpu
+        self.gpu = -1 if gpu is None else gpu
         print(f"Using device {self.device}, cuda available: {torch.cuda.is_available()}")
         self.model = self.constructModel()
         self.trained = False
@@ -87,6 +87,7 @@ class ModelManager:
         config = folder_path.glob("params_*")
         with open(next(config), "r") as f:
             conf = json.load(f)
+        print(f"Loading {conf['architecture']} trained on {conf['dataset']}")
         model_manager = ModelManager(conf["architecture"], conf["dataset"], conf["model_name"], load=folder_path, gpu=gpu)
         model_manager.config = conf
         return model_manager
@@ -261,19 +262,23 @@ class ModelManager:
         There is support for multiple profiles.  
         Note - this function does not check for collisions in pid.
         """
+        assert self.gpu >= 0
         profile_folder = self.path / "profiles"
-        profile_folder.mkdir()
+        profile_folder.mkdir(exist_ok=True)
         prefix = profile_folder / "profile_"
         executable = generateExeName(use_exe)
         print(f"Using executable {executable} for nvprof")
         command = f"nvprof --csv --log-file {prefix}%p.csv --system-profiling on " \
             f"--profile-child-processes {executable} -gpu {self.gpu} -load_path {self.path/'checkpoint.pt'}"\
             f" -seed {seed} -n {n} -input {input}"
+
+        print(f"\nCommand being run:\n{command}\n\n")
         
         success, file = run_command(profile_folder, command)
         retries = 0
+        print(f"{'Success' if success else 'Failure'} on file {file}")
         while not success:
-            print("\nNvprof failed, retrying ... \n")
+            print("\nNvprof retrying ... \n")
             time.sleep(10)
             latest_file(profile_folder).unlink()
             success, file = run_command(profile_folder, command)
@@ -284,11 +289,11 @@ class ModelManager:
         if not success:
             latest_file(profile_folder).unlink()
             raise RuntimeError("Nvprof failed 5 times in a row.")
-        assert self.isProfiled()
         profile_num = str(file.name).split("_")[1].split(".")[0]
         params = {"file": str(file), "profile_number": profile_num, "use_exe": use_exe, "seed": seed, "n": n, "input": input, "success": success, "gpu": self.gpu}
         with open(profile_folder / f"params_{profile_num}.json", "w") as f:
-            json.dump(params, f)
+            json.dump(params, f, indent=4)
+        assert self.isProfiled()
 
     def isProfiled(self) -> bool:
         """
