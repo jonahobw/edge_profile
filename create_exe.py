@@ -9,8 +9,15 @@ import subprocess
 import shlex
 from pathlib import Path
 
+def createHiddenImportStr():
+    HIDDEN_IMPORTS = ["sklearn.utils._typedefs", "sklearn.utils._heap", "sklearn.utils._sorting", "sklearn.utils._cython_blas", "sklearn.neighbors.quad_tree", "sklearn.tree._utils", "sklearn.neighbors._typedefs", "sklearn.utils._typedefs", "sklearn.neighbors._partition_nodes", "sklearn.utils._vector_sentinel", "sklearn.metrics.pairwise"]
+    s = ""
+    for imprt in HIDDEN_IMPORTS:
+        s += f"--hidden-import=\"{imprt}\" "
+    return s
+
 def create_exe():
-    command = "pyinstaller --onefile model_inference.py"
+    command = f"pyinstaller {createHiddenImportStr()} --onefile model_inference.py"
     output = subprocess.run(shlex.split(command), stdout=sys.stdout)
     exe_file = Path.cwd() / "dist" / "model_inference.exe"
     if os.name != "nt":
