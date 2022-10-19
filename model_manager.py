@@ -357,11 +357,12 @@ class ModelManager:
         """
         profile_folder = self.path / "profiles"
         profile_config = [x for x in profile_folder.glob("params_*")]
-        assert len(profile_config) > 0
+        if len(profile_config) == 0:
+            return False
         with open(profile_config[0], "r") as f:
             conf = json.load(f)
         profile_path = Path(conf["file"])
-        return profile_path.exists() and conf["success"]
+        return profile_path.exists()
 
     def getProfile(self) -> Tuple[Path, Dict]:
         """
