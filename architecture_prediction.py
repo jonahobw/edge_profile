@@ -48,7 +48,7 @@ class NNArchPred:
         x = np.expand_dims(x, axis=0)
         preds = self.model.get_preds(x)
         #todo are they normalized to be confidence scores?
-        pred = preds.argmax()
+        pred = preds.argmax().cpu()
         conf = preds[pred]
         label = self.label_encoder.inverse_transform(np.array([pred]))
         return label[0], conf.item()

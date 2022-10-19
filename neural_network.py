@@ -50,9 +50,9 @@ class Net(torch.nn.Module):
         return self.get_layer(self.layer_count - 1)(x)
 
     def get_preds(self, x, grad=False):
-        x = x.to(self.device)
         x = self.normalize(x)
         x  = torch.tensor(x, dtype=torch.float32)
+        x = x.to(self.device)
         with torch.set_grad_enabled(grad):
             output = self(x)
         output = torch.nn.functional.softmax(output)

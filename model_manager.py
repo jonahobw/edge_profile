@@ -216,6 +216,7 @@ class ModelManager:
         acc1 = OnlineStats()
         acc5 = OnlineStats()
         step_size = OnlineStats()
+        step_size.add(optim.param_groups[0]["lr"])
 
         epoch_iter = tqdm(dl)
         epoch_iter.set_description(
@@ -504,6 +505,7 @@ class SurrogateModelManager(ModelManager):
         acc1 = OnlineStats()
         acc5 = OnlineStats()
         step_size = OnlineStats()
+        step_size.add(optim.param_groups[0]["lr"])
 
         epoch_iter = tqdm(dl)
         epoch_iter.set_description(
