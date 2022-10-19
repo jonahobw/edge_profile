@@ -471,7 +471,7 @@ class SurrogateModelManager(ModelManager):
         folder.mkdir()
         return folder
 
-    def trainSaveAll(self, num_epochs: int, lr: float = 1e-3, debug: int = None):
+    def trainSaveAll(self, num_epochs: int, lr: float = 1e-1, debug: int = None):
         """Wrapper around trainModel to add some more config data."""
         self.trainModel(num_epochs, lr, debug)
         self.config["victim_config"] = self.victim_model.config
@@ -544,12 +544,12 @@ class SurrogateModelManager(ModelManager):
         top1 = acc1.mean
         top5 = acc5.mean
 
+        if train and debug is None:
+            lr_scheduler.step(loss)
+
         # commented out because we want the training loss to be the loss between
         # victim and surrogate model predictions.
         # note that top1 and top5 accuracy don't mean much for the training epochs.
-
-        # if train and debug is None:
-        #     lr_scheduler.step(loss)
         #     # get actual train accuracy/loss after weights update
         #     top1, top5, loss = accuracy(
         #         model=self.model,
