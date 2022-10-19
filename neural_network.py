@@ -15,7 +15,7 @@ from sklearn.preprocessing import StandardScaler
 from metrics import correct, accuracy
 
 class Net(torch.nn.Module):
-    def __init__(self, input_size, num_classes, hidden_layer_factor=2, layers=3):
+    def __init__(self, input_size, num_classes, hidden_layer_factor=0.5, layers=3):
         super().__init__()
         self.construct_architecture(input_size, hidden_layer_factor, num_classes, layers)
         self.layer_count = layers
@@ -28,7 +28,7 @@ class Net(torch.nn.Module):
 
     def construct_architecture(self, input_size, hidden_layer_factor, num_classes, layers):
         layer_count = 0
-        hidden_layer_size = input_size * hidden_layer_factor
+        hidden_layer_size = int(input_size * hidden_layer_factor)
         for i in range(layers):
             if i == 0:
                 layer = nn.Linear(input_size, hidden_layer_size)
@@ -49,9 +49,11 @@ class Net(torch.nn.Module):
         return self.get_layer(self.layer_count - 1)(x)
 
     def get_preds(self, x, grad=False):
-        x_normalized = self.normalize(x)
+        x = self.normalize(x)
+        x  = torch.tensor(x, dtype=torch.float32)
         with torch.set_grad_enabled(grad):
-            output = self(x_normalized)
+            output = self(x)
+        output = torch.nn.functional.softmax(output)
         return torch.squeeze(output)
 
     def normalize(self, x, fit=False):

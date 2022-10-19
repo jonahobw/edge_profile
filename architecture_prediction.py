@@ -3,6 +3,7 @@ Takes cleaned profile data and runs classifiers on it to predict model architect
 
 Currently supports logistic regression and neural net.
 """
+import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
@@ -38,20 +39,19 @@ class NNArchPred:
         self.model.train(self.x_tr, self.x_test, self.y_train, self.y_test)
     
     def preprocessInput(self, x: pd.Series):
-        x = add_indicator_cols_to_input(self.data, x)
-        x = x.drop("file")
-        x = x.drop("model_family")
-        x = x.drop("model")
+        x = add_indicator_cols_to_input(self.data, x, exclude=["file", "model", "model_family"])
         return x
     
     def predict(self, x: pd.Series):
         x = self.preprocessInput(x)
+        x = x.to_numpy()
+        x = np.expand_dims(x, axis=0)
         preds = self.model.get_preds(x)
         #todo are they normalized to be confidence scores?
         pred = preds.argmax()
         conf = preds[pred]
-        label = self.label_encoder.inverse_transform(pred)
-        return label, conf
+        label = self.label_encoder.inverse_transform(np.array([pred]))
+        return label[0], conf.item()
 
 
 def neural_net(agg_csv_folder=None, system_data_only=False, no_system_data=False, label=None, shared_data_only=True,

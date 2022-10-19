@@ -236,27 +236,45 @@ def add_indicator_columns(df):
             raise RuntimeError(f"Still NaNs in column {col}")
     return df
 
-def add_indicator_cols_to_input(df, x: pd.Series):
+
+def add_indicator_cols_to_input(df, x: pd.Series, exclude: list = []) -> pd.Series:
     """
     For an input x, add indicator columns to x so that it has the same 
     columns as df.  Replace missing values in x with mean.  Return
-    new x.
+    new x.  Drop columns of x that are not in df.
+    Excluded columns are skipped.
     """
+
+    # first add indicators
     for col in df.columns:
+        # filter out non-indicator columns
+        if col in exclude or not col.startswith("indicator_"):
+            continue
+        original_name = col.split("indicator_")[1]
+        if original_name in x.keys():
+            x[col] = 1
+        else:
+            x[col] = 0
+    
+    # now all indicator columns are added, fill in missing
+    # values with the mean
+    for col in df.columns:
+        if col in exclude or col.startswith("indicator_"):
+            continue
         if col not in x.keys():
-            if col.startswith("indicator_"):
-                original_name = col.split("indicator_")[1]
-                if original_name in x.keys():
-                    x[col] = 1
-                else:
-                    x[col] = 0
-            else:
-                x[col] = df[col].mean()
+            x[col] = df[col].mean()
+
     for i in x.keys():
         if i not in df.columns:
             x = x.drop(i)
-    return x
+    
+    # sort x in order of the keys of the df.
 
+    new_df = df.append(x, ignore_index=True)
+
+    result = new_df.iloc[-1]
+    result = result.drop(exclude)
+    return result
 
 
 def all_data(agg_csv_folder, system_data_only=False, no_system_data=False, indicators_only=False):

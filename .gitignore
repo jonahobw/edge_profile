@@ -8,6 +8,8 @@ datasets/
 train_progress*
 .DS_Store
 temp.py
+arch_pred_models/
+models_backup/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
