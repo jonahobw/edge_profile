@@ -410,12 +410,14 @@ class SurrogateModelManager(ModelManager):
         gpu: int = None,
         arch_model: str = "nn",
         load: dict = {},
+        nvprof_args: dict={}
     ):
         """
         If load is not none, it should be a dictionary containing the model architecture,
         architecture prediction model type, architecture confidence, and path to model.
         """
         self.victim_model = ModelManager.load(victim_model_path, gpu=gpu)
+        self.nvprof_args = nvprof_args
         load_path = None
         if load:
             self.arch_pred_model = load["arch_pred_model"]
@@ -433,18 +435,11 @@ class SurrogateModelManager(ModelManager):
             gpu=gpu,
             load=load_path,
         )
-        self.config.update({"arch_pred_model": arch_model, "arch_confidence": conf})
-
-    def profileVictim(
-        self, use_exe: bool = True, seed: int = 47, n: int = 10, input: str = "0"
-    ):
-        """Not used, assume that victim model has already been profiled."""
-        # todo if victim hasn't been profiled, then run profile
-        if not self.victim_model.isProfiled():
-            self.victim_model.runNVProf(use_exe, seed, n, input)
-        return self.victim_model.getProfile()
+        self.config.update({"arch_pred_model": arch_model, "arch_confidence": conf, "nvprof_args": nvprof_args})
 
     def predictVictimArch(self, model_type: str):
+        if not self.victim_model.isProfiled():
+            self.victim_model.runNVProf(**self.nvprof_args)
         profile_csv, config = self.victim_model.getProfile()
         profile_features = parse_one_profile(profile_csv, gpu=config["gpu"])
         print(f"Training architecture prediction model {model_type}")
@@ -592,10 +587,11 @@ def profileAllVictimModels(gpu=0):
         for model_folder in [i for i in arch.glob("*")]:
             path = models_folder / arch / model_folder / "checkpoint.pt"
             model_manager = ModelManager.load(path, gpu=gpu)
-            model_manager.runNVProf()
+            model_manager.runNVProf(False)
 
 
 def trainSurrogateModels(epochs=150, gpu=0, reverse=False, debug=None):
+    nvprof_args = {"use_exe": False}
     models_folder = Path.cwd() / "models"
     arch_folders = [i for i in models_folder.glob("*")]
     if reverse:
@@ -603,7 +599,7 @@ def trainSurrogateModels(epochs=150, gpu=0, reverse=False, debug=None):
     for arch in arch_folders:
         for model_folder in [i for i in arch.glob("*")]:
             victim_path = models_folder / arch / model_folder / "checkpoint.pt"
-            surrogate_model = SurrogateModelManager(victim_path, gpu=gpu)
+            surrogate_model = SurrogateModelManager(victim_path, gpu=gpu, nvprof_args=nvprof_args)
             surrogate_model.trainSaveAll(epochs, debug=debug)
 
 
