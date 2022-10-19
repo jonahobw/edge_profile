@@ -25,6 +25,7 @@ class Net(torch.nn.Module):
         self.y_test = None
         self.accuracy = None
         self.scaler = None
+        self.device = device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     def construct_architecture(self, input_size, hidden_layer_factor, num_classes, layers):
         layer_count = 0
@@ -49,6 +50,7 @@ class Net(torch.nn.Module):
         return self.get_layer(self.layer_count - 1)(x)
 
     def get_preds(self, x, grad=False):
+        x = x.to(self.device)
         x = self.normalize(x)
         x  = torch.tensor(x, dtype=torch.float32)
         with torch.set_grad_enabled(grad):
@@ -101,13 +103,12 @@ class Net(torch.nn.Module):
         optimizer = optim.SGD(self.parameters(), lr, momentum=0.9)
         # optimizer = optim.Adam(model.parameters(), lr=lr)
 
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        x_tr = x_tr.to(device)
-        y_tr = y_tr.to(device)
-        x_test = x_test.to(device)
-        y_test = y_test.to(device)
-        self.to(device)
-        criterion = criterion.to(device)
+        x_tr = x_tr.to(self.device)
+        y_tr = y_tr.to(self.device)
+        x_test = x_test.to(self.device)
+        y_test = y_test.to(self.device)
+        self.to(self.device)
+        criterion = criterion.to(self.device)
 
         for epoch in range(epochs):
             if (epoch % 25 == 0 and epoch != 0):
