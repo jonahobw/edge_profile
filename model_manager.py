@@ -430,7 +430,7 @@ class SurrogateModelManager(ModelManager):
             self.arch_pred_model = load["arch_pred_model"]
             architecture = load["architecture"]
             self.arch_confidence = load["arch_confidence"]
-            load_path = Path(load["path"]) / "checkpoint.pt"
+            load_path = Path(load["path"])
         else:
             self.arch_pred_model = None
             architecture, conf = self.predictVictimArch(arch_model)
@@ -442,7 +442,8 @@ class SurrogateModelManager(ModelManager):
             gpu=gpu,
             load=load_path,
         )
-        self.config.update({"arch_pred_model": arch_model, "arch_confidence": conf, "nvprof_args": nvprof_args})
+        if not load:
+            self.config.update({"arch_pred_model": arch_model, "arch_confidence": conf, "nvprof_args": nvprof_args})
 
     def predictVictimArch(self, model_type: str):
         if not self.victim_model.isProfiled():
@@ -469,6 +470,7 @@ class SurrogateModelManager(ModelManager):
             conf = json.load(f)
         surrogate_manager = SurrogateModelManager(victim_model_path, gpu, load=conf)
         surrogate_manager.config.update(conf)
+        print(f"Loaded surrogate model\n{model_path}\n")
         return surrogate_manager
 
     def generateFolder(self) -> str:
@@ -577,8 +579,8 @@ class SurrogateModelManager(ModelManager):
         since = time.time()
         self.model.eval()
         self.model.to(self.device)
-        self.victim_model.to(self.device)
-        self.victim_model.eval()
+        self.victim_model.model.to(self.device)
+        self.victim_model.model.eval()
 
         data = "train"
         dl = self.dataset.train_dl
@@ -588,8 +590,8 @@ class SurrogateModelManager(ModelManager):
 
         results = {"inputs_tested": 0,
                    "both_correct1": 0, "both_correct5": 0,
-                   "transfer_correct1": 0, "transfer_correct5": 0,
-                   "target_correct1": 0, "target_correct5": 0}
+                   "surrogate_correct1": 0, "surrogate_correct5": 0,
+                   "victim_correct1": 0, "victim_correct5": 0}
 
         surrogate_acc1 = OnlineStats()
         surrogate_acc5 = OnlineStats()
@@ -605,24 +607,24 @@ class SurrogateModelManager(ModelManager):
             # generate adversarial examples using the surrogate model
             x_adv_surrogate = self.runPGD(x, eps, step_size, iterations, norm)
             # get predictions from surrogate and victim model
-            y_pred_surrogate = self.transfer_model(x_adv_surrogate)
-            y_pred_victim = self.model(x_adv_surrogate)
+            y_pred_surrogate = self.model(x_adv_surrogate)
+            y_pred_victim = self.victim_model.model(x_adv_surrogate)
 
             results["inputs_tested"] += y.size(0)
 
-            adv_c1_surrogate, adv_c5_surrogate = correct(y_pred_surrogate, y, (1, 5))
+            adv_c1_surrogate, adv_c5_surrogate = correct(y_pred_surrogate, y, topk)
             results["surrogate_correct1"] += adv_c1_surrogate
             results["surrogate_correct5"] += adv_c5_surrogate
             surrogate_acc1.add(adv_c1_surrogate / dl.batch_size)
             surrogate_acc5.add(adv_c5_surrogate / dl.batch_size)
 
-            adv_c1_victim, adv_c5_victim = correct(y_pred_victim, y, (1, 5))
+            adv_c1_victim, adv_c5_victim = correct(y_pred_victim, y, topk)
             results["target_correct1"] += adv_c1_victim
             results["target_correct5"] += adv_c5_victim
             victim_acc1.add(adv_c1_victim / dl.batch_size)
             victim_acc5.add(adv_c5_victim / dl.batch_size)
             
-            both_correct1, both_correct5 = both_correct(y_pred_surrogate, y_pred_victim, y, (1, 5))
+            both_correct1, both_correct5 = both_correct(y_pred_surrogate, y_pred_victim, y, topk)
             results["both_correct1"] += both_correct1
             results["both_correct5"] += both_correct5
 
