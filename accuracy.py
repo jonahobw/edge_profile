@@ -59,8 +59,6 @@ def both_correct(output1, output2, target, topk=(1,)):
         pred2 = pred2.t()
         correct2 = pred2.eq(target.view(1, -1).expand_as(pred2)).float()
 
-        both_correct = correct1 * correct2
-
         res = []
         for k in topk:
             correct_k1 = torch.sum(correct1[:k], dim=0)
