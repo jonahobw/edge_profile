@@ -206,9 +206,7 @@ def get_data_and_labels(df, shuffle=True, label=None):
     else:
         y = df[label]
 
-    x = df.drop("file", axis=1)
-    x = x.drop("model_family", axis=1)
-    x = x.drop("model", axis=1)
+    x = df.drop(columns=["file", "model_family", "model"], axis=1)
 
     return x, y
 
@@ -269,8 +267,8 @@ def add_indicator_cols_to_input(df, x: pd.Series, exclude: list = []) -> pd.Seri
             x = x.drop(i)
     
     # sort x in order of the keys of the df.
-
-    new_df = df.append(x, ignore_index=True)
+    x = pd.DataFrame([x])
+    new_df = pd.concat((df, x), ignore_index=True)
 
     result = new_df.iloc[-1]
     result = result.drop(exclude)

@@ -384,9 +384,18 @@ class ModelManager:
         assert profile_path.exists()
         return profile_path, conf
 
-    def runPGD(self, x: torch.Tensor, eps: float, step_size: float, iterations: int, norm = np.inf) -> torch.Tensor:
-        return projected_gradient_descent(self.model, x, eps=eps, eps_iter=step_size, nb_iter=iterations, norm=norm)
-        
+    def runPGD(
+        self,
+        x: torch.Tensor,
+        eps: float,
+        step_size: float,
+        iterations: int,
+        norm=np.inf,
+    ) -> torch.Tensor:
+        return projected_gradient_descent(
+            self.model, x, eps=eps, eps_iter=step_size, nb_iter=iterations, norm=norm
+        )
+
     @property
     def train_metrics(self) -> list:
         """Generate the training metrics to be logged to a csv."""
@@ -417,7 +426,7 @@ class SurrogateModelManager(ModelManager):
         gpu: int = None,
         arch_model: str = "nn",
         load: dict = {},
-        nvprof_args: dict={}
+        nvprof_args: dict = {},
     ):
         """
         If load is not none, it should be a dictionary containing the model architecture,
@@ -443,7 +452,13 @@ class SurrogateModelManager(ModelManager):
             load=load_path,
         )
         if not load:
-            self.config.update({"arch_pred_model": arch_model, "arch_confidence": conf, "nvprof_args": nvprof_args})
+            self.config.update(
+                {
+                    "arch_pred_model": arch_model,
+                    "arch_confidence": conf,
+                    "nvprof_args": nvprof_args,
+                }
+            )
 
     def predictVictimArch(self, model_type: str):
         if not self.victim_model.isProfiled():
@@ -567,7 +582,15 @@ class SurrogateModelManager(ModelManager):
 
         return loss, top1, top5
 
-    def transferAttackPGD(self, eps: float, step_size: float, iterations: int, norm = np.inf, train_data: bool=False):
+    def transferAttackPGD(
+        self,
+        eps: float,
+        step_size: float,
+        iterations: int,
+        norm=np.inf,
+        train_data: bool = False,
+        debug: int = None,
+    ):
         """
         Run a transfer attack, generating adversarial inputs on surrogate model and applying them
         to the victim model.
@@ -588,10 +611,15 @@ class SurrogateModelManager(ModelManager):
             data = "val"
             dl = self.dataset.val_dl
 
-        results = {"inputs_tested": 0,
-                   "both_correct1": 0, "both_correct5": 0,
-                   "surrogate_correct1": 0, "surrogate_correct5": 0,
-                   "victim_correct1": 0, "victim_correct5": 0}
+        results = {
+            "inputs_tested": 0,
+            "both_correct1": 0,
+            "both_correct5": 0,
+            "surrogate_correct1": 0,
+            "surrogate_correct5": 0,
+            "victim_correct1": 0,
+            "victim_correct5": 0,
+        }
 
         surrogate_acc1 = OnlineStats()
         surrogate_acc5 = OnlineStats()
@@ -619,20 +647,22 @@ class SurrogateModelManager(ModelManager):
             surrogate_acc5.add(adv_c5_surrogate / dl.batch_size)
 
             adv_c1_victim, adv_c5_victim = correct(y_pred_victim, y, topk)
-            results["target_correct1"] += adv_c1_victim
-            results["target_correct5"] += adv_c5_victim
+            results["victim_correct1"] += adv_c1_victim
+            results["victim_correct5"] += adv_c5_victim
             victim_acc1.add(adv_c1_victim / dl.batch_size)
             victim_acc5.add(adv_c5_victim / dl.batch_size)
-            
-            both_correct1, both_correct5 = both_correct(y_pred_surrogate, y_pred_victim, y, topk)
+
+            both_correct1, both_correct5 = both_correct(
+                y_pred_surrogate, y_pred_victim, y, topk
+            )
             results["both_correct1"] += both_correct1
             results["both_correct5"] += both_correct5
 
             epoch_iter.set_postfix(
-                transf_acc1=surrogate_acc1.mean,
-                transf_acc5=surrogate_acc5.mean,
-                targ_acc1=victim_acc1.mean,
-                targ_acc5=victim_acc5.mean,
+                surrogate_acc1=surrogate_acc1.mean,
+                surrogate_acc5=surrogate_acc5.mean,
+                victim_acc1=victim_acc1.mean,
+                victim_acc5=victim_acc5.mean,
             )
 
             if self.debug is not None and i == self.debug:
@@ -641,14 +671,27 @@ class SurrogateModelManager(ModelManager):
         results["both_correct1"] = results["both_correct1"] / results["inputs_tested"]
         results["both_correct5"] = results["both_correct5"] / results["inputs_tested"]
 
-        results["surrogate_correct1"] = results["surrogate_correct1"] / results["inputs_tested"]
-        results["surrogate_correct5"] = results["surrogate_correct5"] / results["inputs_tested"]
+        results["surrogate_correct1"] = (
+            results["surrogate_correct1"] / results["inputs_tested"]
+        )
+        results["surrogate_correct5"] = (
+            results["surrogate_correct5"] / results["inputs_tested"]
+        )
 
-        results["victim_correct1"] = results["victim_correct1"] / results["inputs_tested"]
-        results["victim_correct5"] = results["victim_correct5"] / results["inputs_tested"]
+        results["victim_correct1"] = (
+            results["victim_correct1"] / results["inputs_tested"]
+        )
+        results["victim_correct5"] = (
+            results["victim_correct5"] / results["inputs_tested"]
+        )
 
         results["transfer_runtime"] = time.time() - since
-        results["parameters"] = {"eps": eps, "step_size": step_size, "iterations": iterations, "data": data}
+        results["parameters"] = {
+            "eps": eps,
+            "step_size": step_size,
+            "iterations": iterations,
+            "data": data,
+        }
 
         print(json.dumps(results, indent=4))
         if "transfer_results" not in self.config:
@@ -700,22 +743,34 @@ def trainSurrogateModels(epochs=150, gpu=0, reverse=False, debug=None):
     for arch in arch_folders:
         for model_folder in [i for i in arch.glob("*")]:
             victim_path = models_folder / arch / model_folder / "checkpoint.pt"
-            surrogate_model = SurrogateModelManager(victim_path, gpu=gpu, nvprof_args=nvprof_args)
+            surrogate_model = SurrogateModelManager(
+                victim_path, gpu=gpu, nvprof_args=nvprof_args
+            )
             surrogate_model.trainSaveAll(epochs, debug=debug)
 
-def runTransferSurrogateModels(gpu=0, eps = 0.031372549, step_size = 0.0078431, iterations = 10, train_data: bool=True):
+
+def runTransferSurrogateModels(
+    gpu=0, eps=0.031372549, step_size=0.0078431, iterations=10, train_data: bool = True
+):
     models_folder = Path.cwd() / "models"
     arch_folders = [i for i in models_folder.glob("*")]
     for arch in arch_folders:
         for model_folder in [i for i in arch.glob("*")]:
-            surrogate_path = models_folder / arch / model_folder / "surrogate" / "checkpoint.pt"
+            surrogate_path = (
+                models_folder / arch / model_folder / "surrogate" / "checkpoint.pt"
+            )
             if surrogate_path.exists():
                 surrogate_model = SurrogateModelManager.load(surrogate_path, gpu=gpu)
-                surrogate_model.transferAttackPGD(eps=eps, step_size=step_size, iterations=iterations, train_data=train_data)
+                surrogate_model.transferAttackPGD(
+                    eps=eps,
+                    step_size=step_size,
+                    iterations=iterations,
+                    train_data=train_data,
+                )
 
 
 if __name__ == "__main__":
     # trainAllVictimModels(1, debug=2, reverse=True)
     # profileAllVictimModels()
-    # trainSurrogateModels(reverse=False, gpu=0)
-    runTransferSurrogateModels(gpu=-1)
+    trainSurrogateModels(reverse=False, gpu=-1)
+    # runTransferSurrogateModels(gpu=-1)

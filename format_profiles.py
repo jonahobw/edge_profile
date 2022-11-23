@@ -71,10 +71,13 @@ def parse_one_aggregate_profile(csv_file=None, example=False, nrows=None, skipro
     """
 
     if nrows is None:
-        with open(csv_file) as f:
-            for i, line in enumerate(f):
-                if line == "\n":
-                    break
+        try:
+            with open(csv_file) as f:
+                for i, line in enumerate(f):
+                    if line == "\n":
+                        break
+        except TimeoutError:
+            raise TimeoutError(f"TimeoutError on file {csv_file}")
         nrows = i-skiprows
 
     if example:
@@ -194,7 +197,7 @@ def parse_one_system_profile(csv_file=None, example=False, nrows=5, skiprows=Non
     return result.iloc[0]
 
 
-def parse_one_profile(csv_file=None, example=False, gpu=0):
+def parse_one_profile(csv_file=None, example=False, gpu=0, remove_nans=True):
     """
     Parse the gpu attributes and system attributes from a csv file from nvprof and return a pandas Series.
 
@@ -205,7 +208,11 @@ def parse_one_profile(csv_file=None, example=False, gpu=0):
     """
     gpu_prof = parse_one_aggregate_profile(csv_file, example=example)
     system_prof = parse_one_system_profile(csv_file, example=example, gpu=gpu)
-    return gpu_prof.append(system_prof)
+    # return gpu_prof.append(system_prof)
+    df = pd.concat((gpu_prof, system_prof))
+    if remove_nans:
+        df.dropna(inplace=True)
+    return df
 
 
 def parse_all_profiles(folder="profiles", save_filename=None, gpu=0, verbose=True) -> None:
@@ -451,7 +458,7 @@ def read_csv(folder: Path=None, gpu: int=0) -> pd.DataFrame:
     aggregated_csv_file = folder_path / "aggregated.csv"
     if not aggregated_csv_file.exists():
         parse_all_profiles(folder, gpu=gpu)
-    return pd.read_csv(aggregated_csv_file)
+    return pd.read_csv(aggregated_csv_file, index_col=False)
 
 
 if __name__ == '__main__':

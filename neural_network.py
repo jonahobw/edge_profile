@@ -7,6 +7,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import torch.optim as optim
+import pandas as pd
+import numpy as np
 
 import time
 
@@ -49,13 +51,14 @@ class Net(torch.nn.Module):
         # return torch.sigmoid(self.get_layer(self.layer_count-1)(x))
         return self.get_layer(self.layer_count - 1)(x)
 
-    def get_preds(self, x, grad=False):
-        x = self.normalize(x)
+    def get_preds(self, x, grad=False, normalize=True):
+        if normalize:
+            x = self.normalize(x)
         x  = torch.tensor(x, dtype=torch.float32)
         x = x.to(self.device)
         with torch.set_grad_enabled(grad):
             output = self(x)
-        output = torch.nn.functional.softmax(output)
+        output = torch.nn.functional.softmax(output, dim=1)
         return torch.squeeze(output)
 
     def normalize(self, x, fit=False):
@@ -68,6 +71,12 @@ class Net(torch.nn.Module):
                 the training data and false for the test data.
         :return: normalized data
         """
+        if isinstance(x, pd.DataFrame):
+            x = x.to_numpy()
+        
+        assert isinstance(x, np.ndarray)
+        x = torch.from_numpy(x)
+
         if fit:
             # set the scaler
             self.scaler = StandardScaler()
@@ -80,7 +89,7 @@ class Net(torch.nn.Module):
         return self.scaler.transform(x)
 
 
-    def train(self, x_tr, x_test, y_tr, y_test, epochs=100, lr=0.1):
+    def train_(self, x_tr, x_test, y_tr, y_test, epochs=100, lr=0.1, verbose=True):
         # format data
         # X_train = torch.from_numpy(x_tr.to_numpy()).float()
         # y_train = torch.squeeze(torch.from_numpy(y_tr.to_numpy()).float())
@@ -101,6 +110,7 @@ class Net(torch.nn.Module):
 
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.SGD(self.parameters(), lr, momentum=0.9)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, cooldown=3)
         # optimizer = optim.Adam(model.parameters(), lr=lr)
 
         x_tr = x_tr.to(self.device)
@@ -111,8 +121,8 @@ class Net(torch.nn.Module):
         criterion = criterion.to(self.device)
 
         for epoch in range(epochs):
-            if (epoch % 25 == 0 and epoch != 0):
-                lr = lr / 10
+            # if (epoch % 25 == 0 and epoch != 0):
+            #     lr = lr / 10
             with torch.set_grad_enabled(True):
                 y_pred = self(x_tr)
                 y_pred = torch.squeeze(y_pred)
@@ -128,27 +138,30 @@ class Net(torch.nn.Module):
 
             with torch.no_grad():
                 y_test_pred = self(x_test)
-            y_test_pred = torch.squeeze(y_test_pred)
-            test_loss = criterion(y_test_pred, y_test)
+                y_test_pred = torch.squeeze(y_test_pred)
+                test_loss = criterion(y_test_pred, y_test)
+            lr_scheduler.step(train_loss)
+            actual_lr = optimizer.param_groups[0]["lr"]
             test_loss_history.append(test_loss)
             test_acc = correct(y_test_pred, y_test, (1, 3))
             test1_acc = test_acc[0] / len(y_test)
             test3_acc = test_acc[1] / len(y_test)
             test_acc_history.append(test_acc)
-            print("epoch {}\nTrain set - loss: {}, accuracy1: {}, accuracy3: {}\n"
-                  "Test  set - loss: {}, accuracy1: {}, accuracy3: {}\n"
-                  "learning rate: {}"
-                  .format(str(epoch), str(train_loss), str(train1_acc), str(train3_acc),
-                          str(test_loss), str(test1_acc), str(test3_acc),
-                          str(lr)))
+            if verbose:
+                print("epoch {}\nTrain set - loss: {}, accuracy1: {}, accuracy3: {}\n"
+                    "Test  set - loss: {}, accuracy1: {}, accuracy3: {}\n"
+                    "learning rate: {}"
+                    .format(str(epoch), str(train_loss), str(train1_acc), str(train3_acc),
+                            str(test_loss), str(test1_acc), str(test3_acc),
+                            str(actual_lr)))
+        if verbose:
+            time_elapsed = time.time() - since
+            print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
 
-        time_elapsed = time.time() - since
-        print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-
-        self.x_tr = x_tr
-        self.x_test = x_test
-        self.y_tr = y_tr
-        self.y_test = y_test
+        # self.x_tr = x_tr
+        # self.x_test = x_test
+        # self.y_tr = y_tr
+        # self.y_test = y_test
 
         return training_acc_history, test_acc_history, training_loss_history, test_loss_history
 
