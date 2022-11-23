@@ -22,8 +22,16 @@ all_models = []
 for i in model_families:
     all_models.extend(i[1])
 
-def get_model(model_arch:str, pretrained=False, model_kwargs={}):
+model_kwargs = {
+    "googlenet": {
+        "aux_logits": False
+    }
+}
+
+def get_model(model_arch:str, pretrained=False, kwargs={}):
     model_arch = model_arch.lower()
     if model_arch not in name_to_family:
         raise ValueError(f"Model {model_arch} not supported")
-    return getattr(models, model_arch)(pretrained=pretrained, **model_kwargs)
+    if model_arch in model_kwargs:
+        kwargs.update(model_kwargs[model_arch])
+    return getattr(models, model_arch)(pretrained=pretrained, **kwargs)

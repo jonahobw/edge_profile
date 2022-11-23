@@ -12,8 +12,9 @@ from sklearn.feature_selection import RFE
 from sklearn.metrics import f1_score
 import pandas as pd
 
-from data_engineering import shared_data, get_data_and_labels, all_data, add_indicator_cols_to_input
+from data_engineering import shared_data, get_data_and_labels, all_data, add_indicator_cols_to_input, remove_cols
 from neural_network import Net
+from config import SYSTEM_SIGNALS
 
 class NNArchPred:
 
@@ -21,6 +22,9 @@ class NNArchPred:
         self.verbose = verbose
         if df is None:
             df = all_data("zero_noexe_lots_models", no_system_data=True)
+            exclude_cols = SYSTEM_SIGNALS
+            exclude_cols.extend(["memcpy", "Malloc", "memset", "avg_us", "time_ms", "max_ms", "min_us"])
+            df = remove_cols(df, substrs=exclude_cols)
         self.data = df
         self.label = label
         self.label_encoder = LabelEncoder()

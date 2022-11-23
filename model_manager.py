@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import time
 from typing import Callable, Dict, Tuple
+import traceback
 
 import torch
 import numpy as np
@@ -41,6 +42,8 @@ class ModelManager:
         model_name: str,
         load: str = None,
         gpu: int = None,
+        data_subset_percent: float = None,
+        idx: int = 0
     ):
         """
         Models files are stored in a folder
@@ -56,9 +59,14 @@ class ModelManager:
             load (str, optional): If provided, should be the absolute path to the model folder,
                 {cwd}/models/{model_architecture}/{self.name}{date_time}.  This will load the model
                 stored there.
+            data_subset_percent (float, optional): If provided, should be the fraction of the dataset
+                to use.  This will be generated determinisitcally.  Uses torch.utils.data.random_split
+                (see datasets.py)
+            idx (int): the index into the subset of the dataset.  0 for victim model and 1 for surrogate.
         """
         self.architecture = architecture
-        self.dataset = Dataset(dataset)
+        self.data_subset_percent = data_subset_percent
+        self.dataset = Dataset(dataset, data_subset_percent=data_subset_percent, idx=idx)
         self.model_name = model_name
         self.device = torch.device("cpu")
         if gpu is not None and torch.cuda.is_available():
@@ -81,6 +89,7 @@ class ModelManager:
             "dataset": self.dataset.name,
             "model_name": self.model_name,
             "device": str(self.device),
+            "data_subset_percent": data_subset_percent
         }
         self.epochs = 0
 
@@ -98,6 +107,7 @@ class ModelManager:
             conf["model_name"],
             load=folder_path,
             gpu=gpu,
+            data_subset_percent=conf["data_subset_percent"]
         )
         model_manager.config = conf
         return model_manager
@@ -120,7 +130,7 @@ class ModelManager:
 
     def constructModel(self) -> torch.nn.Module:
         model = get_model(
-            self.architecture, model_kwargs={"num_classes": self.dataset.num_classes}
+            self.architecture, kwargs={"num_classes": self.dataset.num_classes}
         )  # todo num_classes
         model.to(self.device)
         return model
@@ -450,6 +460,8 @@ class SurrogateModelManager(ModelManager):
             model_name=f"surrogate_{self.victim_model.model_name}_{architecture}",
             gpu=gpu,
             load=load_path,
+            data_subset_percent=self.victim_model.data_subset_percent
+            idx=1
         )
         if not load:
             self.config.update(
@@ -702,7 +714,12 @@ class SurrogateModelManager(ModelManager):
         return
 
 
-def trainAllVictimModels(epochs=150, gpu=None, reverse=False, debug=None):
+def trainOneVictim(model_arch, epochs=150, gpu=None, debug=None):
+    a = ModelManager(model_arch, "cifar10", model_arch, gpu=gpu)
+    a.trainModel(num_epochs=epochs, debug=debug)
+
+
+def trainAllVictimModels(epochs=150, gpu=None, reverse=False, debug=None, repeat=False):
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     file_path = Path.cwd() / f"train_progress_{timestamp}.txt"
     f = open(file_path, "w")
@@ -714,13 +731,15 @@ def trainAllVictimModels(epochs=150, gpu=None, reverse=False, debug=None):
     for i, model in enumerate(models):
         if debug and i > debug:
             break
+        model_arch_folder = Path.cwd() / "models" / model
+        if not repeat and model_arch_folder.exists():
+            continue
         try:
-            a = ModelManager(model, "cifar10", model, gpu=gpu)
-            a.trainModel(num_epochs=epochs, debug=debug)
+            trainOneVictim(model, epochs=epochs, gpu=gpu, debug=debug)
             f.write(f"{model} success\n")
         except Exception as e:
             print(e)
-            f.write(f"\n\n{model} failed, error\n{e}\n\n")
+            f.write(f"\n\n{model} failed, error\n{e}\ntraceback:\n{traceback.format_exc()}\n\n")
     f.close()
 
 
@@ -772,5 +791,6 @@ def runTransferSurrogateModels(
 if __name__ == "__main__":
     # trainAllVictimModels(1, debug=2, reverse=True)
     # profileAllVictimModels()
-    trainSurrogateModels(reverse=False, gpu=-1)
+    #trainSurrogateModels(reverse=False, gpu=-1)
     # runTransferSurrogateModels(gpu=-1)
+    trainOneVictim("squeezenet1_0")

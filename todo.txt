@@ -1,4 +1,5 @@
 -   figure out where nan columns such as "avg_us_nan" come from in aggregated csv (zero_noexe as example)
+    - comes from profile parsing, some profiles get nan columns
 -   get rid of redundant indicator columns, because indicator will be the same for min, max, etc.
 -   implement recursive feature selection
 -   add column for number of inferences and input type

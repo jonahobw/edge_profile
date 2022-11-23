@@ -5,7 +5,8 @@ import pathlib
 import os
 
 from torchvision import transforms, datasets
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
+from torch import Generator
 
 _constructors = {
     "MNIST": datasets.MNIST,
@@ -47,7 +48,7 @@ def dataset_path(dataset, path=None):
     raise LookupError(f"Could not find {dataset}")
 
 
-def dataset_builder(dataset, train=True, normalize=None, preproc=None, path=None):
+def dataset_builder(dataset, train=True, normalize=None, preproc=None, path=None, resize: int = 224):
     """Build a torch.utils.Dataset with proper preprocessing
 
     Arguments:
@@ -64,6 +65,8 @@ def dataset_builder(dataset, train=True, normalize=None, preproc=None, path=None
     """
     if preproc is not None:
         preproc += [transforms.ToTensor()]
+        if resize is not None:
+            preproc += [transforms.Resize(resize)]
         if normalize is not None:
             preproc += [normalize]
         preproc = transforms.Compose(preproc)
@@ -146,15 +149,19 @@ class Dataset:
         "imagenet": 1000
     }
     
-    def __init__(self, dataset: str, batch_size=128, workers=4) -> None:
+    def __init__(self, dataset: str, batch_size=128, workers=4, data_subset_percent: float = None, seed: int=42, idx: int=0) -> None:
         self.name = dataset.lower()
         self.num_classes = self.num_classes_map[self.name]
         self.train_data = self.name_mapping[self.name]()
-        self.train_dl = DataLoader(self.train_data, shuffle=True, batch_size=batch_size, pin_memory=True, num_workers=4)
+        if data_subset_percent is not None:
+            self.train_data = random_split(self.train_data, [data_subset_percent, 1-data_subset_percent], generator=Generator().manual_seed(seed))[idx]
+        self.train_dl = DataLoader(self.train_data, shuffle=True, batch_size=batch_size, pin_memory=True, num_workers=workers)
         self.val_data = self.name_mapping[self.name](train=False)
-        self.val_dl = DataLoader(self.val_data, shuffle=False, batch_size=batch_size, pin_memory=True, num_workers=4)
+        if data_subset_percent is not None:
+            self.val_data = random_split(self.val_data, [data_subset_percent, 1 - data_subset_percent], generator=Generator().manual_seed(seed))[idx]
+        self.val_dl = DataLoader(self.val_data, shuffle=False, batch_size=batch_size, pin_memory=True, num_workers=workers)
 
         self.train_acc_data = self.train_data
         if self.name == "cifar10":
             self.train_acc_data = self.name_mapping[self.name](deterministic=True)
-        self.train_acc_dl = DataLoader(self.train_acc_data, shuffle=False, batch_size=batch_size, pin_memory=True, num_workers=4)
+        self.train_acc_dl = DataLoader(self.train_acc_data, shuffle=False, batch_size=batch_size, pin_memory=True, num_workers=workers)
