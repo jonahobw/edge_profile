@@ -23,7 +23,8 @@ from datasets import Dataset
 from logger import CSVLogger
 from online import OnlineStats
 from accuracy import correct, accuracy, both_correct
-from collect_profiles import run_command, generateExeName, latest_file
+from collect_profiles import run_command, generateExeName
+from utils import latest_file
 from format_profiles import parse_one_profile
 from architecture_prediction import NNArchPred
 
@@ -460,8 +461,8 @@ class SurrogateModelManager(ModelManager):
             model_name=f"surrogate_{self.victim_model.model_name}_{architecture}",
             gpu=gpu,
             load=load_path,
-            data_subset_percent=self.victim_model.data_subset_percent
-            idx=1
+            data_subset_percent=self.victim_model.data_subset_percent,
+            idx=1,
         )
         if not load:
             self.config.update(

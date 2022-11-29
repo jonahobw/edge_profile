@@ -11,7 +11,7 @@ from model_manager import ModelManager
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-model", type=str, default="resnet", required=False)
-parser.add_argument("-n", type=int, default=10, required=False,
+parser.add_argument("-n", type=int, default=1, required=False,
                     help="number of inferences")
 parser.add_argument("-gpu", type=int, default=-1, required=False,
                     help="-1 for cpu, else number of gpu")

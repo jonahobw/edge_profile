@@ -10,6 +10,7 @@ train_progress*
 temp.py
 arch_pred_models/
 models_backup/
+email_pw.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

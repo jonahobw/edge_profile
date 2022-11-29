@@ -4,11 +4,15 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 
+import sys
+ 
+# setting path
+sys.path.append('../edge_profile')
 
-from ..data_engineering import shared_data, get_data_and_labels, all_data, add_indicator_cols_to_input
-from ..format_profiles import parse_one_profile
-from ..architecture_prediction import NNArchPred, NNArchPredDebug
-from ..config import SYSTEM_SIGNALS
+from data_engineering import shared_data, get_data_and_labels, all_data, add_indicator_cols_to_input
+from format_profiles import parse_one_profile
+from architecture_prediction import NNArchPred, NNArchPredDebug
+from config import SYSTEM_SIGNALS
 
 def gen_arch_pred_model(debug=False):
     print(f"Training architecture prediction model")
