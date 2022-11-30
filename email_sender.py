@@ -3,6 +3,10 @@ from smtplib import SMTPException, SMTP_SSL
 import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import time
+import json
+
+from utils import timer, dict_to_str
 
 class EmailSender:
     """Stores email sender, reciever, and pw."""
@@ -52,6 +56,39 @@ class EmailSender:
             pw=self.pw,
             send=self.send,
         )
+
+
+    def email_update(self, start: float, iter_start: float, iter: int, total_iters: int, subject: str, params: dict = {}) -> None:
+        """
+        Format and send an email that gives a progress update on iterative computational jobs.
+        One email will be sent per iteration, and in each email, the message will include
+        - the time for the last iteration
+        - the average time per iteration
+        - an estimate of how much longer until the job is done
+
+        **Assumes that the iterations start at 1, not zero
+
+        Args:
+            start (float): the starting time of the entire job, obtained from time.time()
+            iter_start (float): the starting time of the iteration that just ended, obtained
+                from time.time()
+            iter (int): the iteration that just finished
+            total_iters (int): how many iterations there are int total
+            subject (str): the email subject line
+            params (dict): any json data to be added to the email body
+        """
+        left = total_iters - iter
+        done_percent = "{:.0f}".format((iter) / total_iters * 100)
+        mean_time = (time.time() - start) / (iter)
+        estimated_time_remaining = timer(left * mean_time)
+        content = (f"{left} Experiments Left, {done_percent}% Completed"
+                        f"Time of last experiment: {timer(time.time() - iter_start)}\n"
+                        f"Estimated time remaining ({left} experiments left and "
+                        f"{timer(mean_time)} per experiment): "
+                        f"{estimated_time_remaining}\n\n"
+                        f"{dict_to_str(params)}\n")
+        self.email(subject, content)
+
 
 
 def email(
