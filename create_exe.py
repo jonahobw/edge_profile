@@ -65,6 +65,8 @@ def cleanup():
     spec_file = Path.cwd() / "model_inference.spec"
     spec_file.unlink(missing_ok=True)
 
-
-create_exe()
 cleanup()
+try:
+    create_exe()
+finally:
+    cleanup()
