@@ -154,7 +154,7 @@ if __name__ == '__main__':
     save_args["folder"] = str(profile_folder)
     save_args["gpu_name"] = gpu_name
 
-    if file.exists:
+    if file.exists():
         with open(file, 'r') as f:
             old_conf = json.load(f)
         for arg in old_conf:
