@@ -153,8 +153,15 @@ if __name__ == '__main__':
     save_args["system"] = getSystem()
     save_args["folder"] = str(profile_folder)
     save_args["gpu_name"] = gpu_name
-    with open(file, 'w') as f:
-        json.dump(save_args, f, indent=4)
+
+    if file.exists:
+        with open(file, 'r') as f:
+            old_conf = json.load(f)
+        for arg in old_conf:
+            assert old_conf[arg] == save_args[arg]
+    else:
+        with open(file, 'w') as f:
+            json.dump(save_args, f, indent=4)
 
     try:
         for model_num, model in enumerate(config.MODELS):
