@@ -189,7 +189,7 @@ if __name__ == '__main__':
                     print("\nNvprof failed, retrying ... \n")
                     time.sleep(10)
                     latest_file(model_folder).unlink()
-                    success, file = run_command(model_folder, command, model)
+                    success, file = run_command(model_folder, command)
                     retries += 1
                     if retries > 5:
                         print("Reached 5 retries, exiting...")

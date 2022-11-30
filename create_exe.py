@@ -9,12 +9,28 @@ import subprocess
 import shlex
 from pathlib import Path
 
+
 def createHiddenImportStr():
-    HIDDEN_IMPORTS = ["sklearn.utils._typedefs", "sklearn.utils._heap", "sklearn.utils._sorting", "sklearn.utils._cython_blas", "sklearn.neighbors.quad_tree", "sklearn.tree._utils", "sklearn.neighbors._typedefs", "sklearn.utils._typedefs", "sklearn.neighbors._partition_nodes", "sklearn.utils._vector_sentinel", "sklearn.metrics.pairwise"]
+    HIDDEN_IMPORTS = [
+        "sklearn.utils._typedefs",
+        "sklearn.utils._heap",
+        "sklearn.utils._sorting",
+        "sklearn.utils._cython_blas",
+        "sklearn.neighbors.quad_tree",
+        "sklearn.tree._utils",
+        "sklearn.neighbors._typedefs",
+        "sklearn.utils._typedefs",
+        "sklearn.neighbors._partition_nodes",
+        "sklearn.utils._vector_sentinel",
+        "sklearn.metrics.pairwise",
+        "torch",
+        "torchvision"
+    ]
     s = ""
     for imprt in HIDDEN_IMPORTS:
-        s += f"--hidden-import=\"{imprt}\" "
+        s += f'--hidden-import="{imprt}" '
     return s
+
 
 def create_exe():
     command = f"pyinstaller {createHiddenImportStr()} --onefile model_inference.py"
@@ -35,6 +51,7 @@ def create_exe():
         destination = destination_folder / "windows_inference.exe"
 
     shutil.copy(exe_file, destination)
+
 
 def cleanup():
     dist_folder = Path.cwd() / "dist"
