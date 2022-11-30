@@ -8,6 +8,7 @@ import os
 import subprocess
 import shlex
 from pathlib import Path
+import site
 
 
 def createHiddenImportStr():
@@ -23,17 +24,39 @@ def createHiddenImportStr():
         "sklearn.neighbors._partition_nodes",
         "sklearn.utils._vector_sentinel",
         "sklearn.metrics.pairwise",
-        "torch",
-        "torchvision"
+        # "torch",
+        # "torchvision",
+        # "torch.jit",
     ]
     s = ""
     for imprt in HIDDEN_IMPORTS:
         s += f'--hidden-import="{imprt}" '
     return s
 
+def createAddDataStr():
+    site_packs_folder = Path(site.getsitepackages()[0])
+    pkgs = [
+        "torch"
+    ]
+    s = ""
+    for pkg in pkgs:
+        folder = str(site_packs_folder / pkg)
+        s += f'--add-data="{folder}:." '
+    return s
+
+def createExcludeModsStr():
+    exclude = [
+        "torch.distributions"
+    ]
+    s = ""
+    for x in exclude:
+        s += f'--exclude-module="{x}" '
+    return s
+
 
 def create_exe():
-    command = f"pyinstaller {createHiddenImportStr()} --onefile model_inference.py"
+    command = (f"pyinstaller {createHiddenImportStr()}"# {createAddDataStr()} {createExcludeModsStr()}"
+        f" --onefile --clean model_inference.py")
     output = subprocess.run(shlex.split(command), stdout=sys.stdout)
     exe_file = Path.cwd() / "dist" / "model_inference.exe"
     if os.name != "nt":

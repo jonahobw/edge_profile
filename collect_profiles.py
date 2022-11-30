@@ -158,7 +158,8 @@ if __name__ == '__main__':
         with open(file, 'r') as f:
             old_conf = json.load(f)
         for arg in old_conf:
-            assert old_conf[arg] == save_args[arg]
+            if arg not in ["random_seed"]:
+                assert old_conf[arg] == save_args[arg]
     else:
         with open(file, 'w') as f:
             json.dump(save_args, f, indent=4)
