@@ -18,7 +18,7 @@ from cleverhans.torch.attacks.projected_gradient_descent import (
     projected_gradient_descent,
 )
 
-from get_model import get_model, all_models
+from get_model import get_model, model_kwargs, all_models
 from datasets import Dataset
 from logger import CSVLogger
 from online import OnlineStats
@@ -45,7 +45,7 @@ class ModelManager:
         load: str = None,
         gpu: int = None,
         data_subset_percent: float = None,
-        idx: int = 0
+        idx: int = 0,
     ):
         """
         Models files are stored in a folder
@@ -66,10 +66,15 @@ class ModelManager:
                 (see datasets.py)
             idx (int): the index into the subset of the dataset.  0 for victim model and 1 for surrogate.
         """
-        #todo add option to not load dataset and use this option when profiling
+        # todo add option to not load dataset and use this option when profiling
         self.architecture = architecture
         self.data_subset_percent = data_subset_percent
-        self.dataset = Dataset(dataset, data_subset_percent=data_subset_percent, idx=idx)
+        self.dataset = Dataset(
+            dataset,
+            data_subset_percent=data_subset_percent,
+            idx=idx,
+            resize=model_kwargs.get(architecture, {}).get("input_size", None),
+        )
         self.model_name = model_name
         self.device = torch.device("cpu")
         if gpu is not None and torch.cuda.is_available():
@@ -92,7 +97,7 @@ class ModelManager:
             "dataset": self.dataset.name,
             "model_name": self.model_name,
             "device": str(self.device),
-            "data_subset_percent": data_subset_percent
+            "data_subset_percent": data_subset_percent,
         }
         self.epochs = 0
 
@@ -110,7 +115,7 @@ class ModelManager:
             conf["model_name"],
             load=folder_path,
             gpu=gpu,
-            data_subset_percent=conf["data_subset_percent"]
+            data_subset_percent=conf["data_subset_percent"],
         )
         model_manager.config = conf
         return model_manager
@@ -427,12 +432,12 @@ class ModelManager:
         ]
 
     @staticmethod
-    def getModelPaths(self, prefix: str=None) -> List[Path]:
+    def getModelPaths(self, prefix: str = None) -> List[Path]:
         """
         Return a list of paths to all victim models
         in directory "./<prefix>".  This directory must be organized
         by model architecture folders whose subfolders are victim model
-        folders and contain a model stored in 'checkpoint.pt'.  
+        folders and contain a model stored in 'checkpoint.pt'.
         Default prefix is ./models/
         """
         if prefix is None:
@@ -449,6 +454,7 @@ class ModelManager:
                 else:
                     print(f"Warning, no model found {victim_path}")
         return model_paths
+
 
 class SurrogateModelManager(ModelManager):
     """
@@ -748,7 +754,14 @@ def trainOneVictim(model_arch, epochs=150, gpu=None, debug=None) -> ModelManager
     return a
 
 
-def trainVictimModels(epochs=150, gpu=None, reverse=False, debug=None, repeat=False, models: List[str]=None):
+def trainVictimModels(
+    epochs=150,
+    gpu=None,
+    reverse=False,
+    debug=None,
+    repeat=False,
+    models: List[str] = None,
+):
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     file_path = Path.cwd() / f"train_progress_{timestamp}.txt"
     f = open(file_path, "w")
@@ -775,12 +788,16 @@ def trainVictimModels(epochs=150, gpu=None, reverse=False, debug=None, repeat=Fa
                 iter=i,
                 total_iters=len(models),
                 subject=f"Victim {model} Finished Training",
-                params=manager.config
+                params=manager.config,
             )
         except Exception as e:
             print(e)
-            f.write(f"\n\n{model} failed, error\n{e}\ntraceback:\n{traceback.format_exc()}\n\n")
-            config.EMAIL.email(f"Failed While Training {model}", f"{traceback.format_exc()}")
+            f.write(
+                f"\n\n{model} failed, error\n{e}\ntraceback:\n{traceback.format_exc()}\n\n"
+            )
+            config.EMAIL.email(
+                f"Failed While Training {model}", f"{traceback.format_exc()}"
+            )
     f.close()
 
 
@@ -794,7 +811,14 @@ def profileAllVictimModels(gpu=0):
             model_manager.runNVProf(False)
 
 
-def trainSurrogateModels(nvprof_args: dict, model_paths: List[str] = None, epochs=150, gpu=0, reverse=False, debug=None):
+def trainSurrogateModels(
+    nvprof_args: dict,
+    model_paths: List[str] = None,
+    epochs=150,
+    gpu=0,
+    reverse=False,
+    debug=None,
+):
     if model_paths is None:
         model_paths = ModelManager.getModelPaths()
     if reverse:
@@ -815,12 +839,15 @@ def trainSurrogateModels(nvprof_args: dict, model_paths: List[str] = None, epoch
                 iter=i,
                 total_iters=len(model_paths),
                 subject=f"Surrogate Model for Victim {vict_name} Finished Training",
-                params=surrogate_model.config
+                params=surrogate_model.config,
             )
         except Exception as e:
             vict_name = Path(victim_path).parent.name
             print(e)
-            config.EMAIL.email(f"Failed Training Surrogate model for victim Model {vict_name}", f"{traceback.format_exc()}")
+            config.EMAIL.email(
+                f"Failed Training Surrogate model for victim Model {vict_name}",
+                f"{traceback.format_exc()}",
+            )
 
 
 def runTransferSurrogateModels(
@@ -846,6 +873,6 @@ def runTransferSurrogateModels(
 if __name__ == "__main__":
     # trainAllVictimModels(1, debug=2, reverse=True)
     # profileAllVictimModels()
-    #trainSurrogateModels(reverse=False, gpu=-1)
+    # trainSurrogateModels(reverse=False, gpu=-1)
     # runTransferSurrogateModels(gpu=-1)
-    trainOneVictim("squeezenet1_0")
+    trainOneVictim("alexnet")

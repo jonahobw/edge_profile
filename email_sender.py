@@ -8,6 +8,7 @@ import json
 
 from utils import timer, dict_to_str
 
+
 class EmailSender:
     """Stores email sender, reciever, and pw."""
 
@@ -17,7 +18,7 @@ class EmailSender:
         reciever: str = None,
         pw: str = None,
         send: bool = True,
-        **kwargs
+        **kwargs,
     ) -> None:
         """Store email params."""
 
@@ -25,7 +26,7 @@ class EmailSender:
         self.reciever = reciever
         self.pw = self.retrieve_pw(pw)
         self.send = send
-        if self.send is not None:
+        if not self.send:
             print(f"Email settings: send set to {send}")
         # dummy function in case an argument is not provided:
         if None in (sender, reciever, pw):
@@ -37,12 +38,12 @@ class EmailSender:
         else:
             self.email = self._email
 
-    def retrieve_pw(self, file: str=None) -> str:
+    def retrieve_pw(self, file: str = None) -> str:
         """Retrieves the gmail password from a file."""
 
         if file is None:
             return None
-        with open(Path()/file, 'r') as pw_file:
+        with open(Path() / file, "r") as pw_file:
             pw = pw_file.read()
         return pw
 
@@ -57,8 +58,15 @@ class EmailSender:
             send=self.send,
         )
 
-
-    def email_update(self, start: float, iter_start: float, iter: int, total_iters: int, subject: str, params: dict = {}) -> None:
+    def email_update(
+        self,
+        start: float,
+        iter_start: float,
+        iter: int,
+        total_iters: int,
+        subject: str,
+        params: dict = {},
+    ) -> None:
         """
         Format and send an email that gives a progress update on iterative computational jobs.
         One email will be sent per iteration, and in each email, the message will include
@@ -83,14 +91,15 @@ class EmailSender:
         done_percent = "{:.0f}".format((iter) / total_iters * 100)
         mean_time = (time.time() - start) / (iter)
         estimated_time_remaining = timer(left * mean_time)
-        content = (f"{left} Experiments Left, {done_percent}% Completed"
-                        f"Time of last experiment: {timer(time.time() - iter_start)}\n"
-                        f"Estimated time remaining ({left} experiments left and "
-                        f"{timer(mean_time)} per experiment): "
-                        f"{estimated_time_remaining}\n\n"
-                        f"{dict_to_str(params)}\n")
+        content = (
+            f"{left} Experiments Left, {done_percent}% Completed"
+            f"Time of last experiment: {timer(time.time() - iter_start)}\n"
+            f"Estimated time remaining ({left} experiments left and "
+            f"{timer(mean_time)} per experiment): "
+            f"{estimated_time_remaining}\n\n"
+            f"{dict_to_str(params)}\n"
+        )
         self.email(subject, content)
-
 
 
 def email(
@@ -129,5 +138,3 @@ def email(
             server.quit()
     except Exception as e:
         print("Error while trying to send email: \n%s", e)
-
-
