@@ -66,7 +66,7 @@ class EmailSender:
         - the average time per iteration
         - an estimate of how much longer until the job is done
 
-        **Assumes that the iterations start at 1, not zero
+        **Assumes that the iterations start at 0, not 1, so adds 1 to account for this
 
         Args:
             start (float): the starting time of the entire job, obtained from time.time()
@@ -77,6 +77,8 @@ class EmailSender:
             subject (str): the email subject line
             params (dict): any json data to be added to the email body
         """
+        iter += 1
+        assert iter > 0
         left = total_iters - iter
         done_percent = "{:.0f}".format((iter) / total_iters * 100)
         mean_time = (time.time() - start) / (iter)

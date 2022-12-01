@@ -150,6 +150,10 @@ class Dataset:
     }
     
     def __init__(self, dataset: str, batch_size=128, workers=4, data_subset_percent: float = None, seed: int=42, idx: int=0) -> None:
+        """
+        data_subset_percent will divide the dataset into 2 pieces, and the first will have <data_subset_percent>% of the data.
+            which portion of the data is allocated depends on <idx> which is either 0 or 1
+        """
         self.name = dataset.lower()
         self.num_classes = self.num_classes_map[self.name]
         self.train_data = self.name_mapping[self.name]()
@@ -164,4 +168,6 @@ class Dataset:
         self.train_acc_data = self.train_data
         if self.name == "cifar10":
             self.train_acc_data = self.name_mapping[self.name](deterministic=True)
+            if data_subset_percent is not None:
+                self.train_acc_data = random_split(self.name_mapping[self.name](deterministic=True), [data_subset_percent, 1 - data_subset_percent], generator=Generator().manual_seed(seed))[idx]
         self.train_acc_dl = DataLoader(self.train_acc_data, shuffle=False, batch_size=batch_size, pin_memory=True, num_workers=workers)

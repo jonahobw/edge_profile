@@ -239,7 +239,7 @@ if __name__ == "__main__":
                             shutil.rmtree(profile_folder)
                         raise RuntimeError("Nvprof failed 5 times in a row.")
 
-                elapsed_model_time = (time.time() - start) / 60  # in minutes
+                elapsed_model_time = (time.time() - iter_start) / 60  # in minutes
                 avg_prof_time = elapsed_model_time / (i + 1)
                 est_time = (args.i - i + 1) * avg_prof_time
                 print(
@@ -263,3 +263,4 @@ if __name__ == "__main__":
     except Exception as e:
         tb = traceback.format_exc()
         config.EMAIL.email("PROGRAM CRASHED", f"{tb}\n\n{dict_to_str(save_args)}")
+        raise e

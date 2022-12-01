@@ -215,7 +215,7 @@ def parse_one_profile(csv_file=None, example=False, gpu=0, remove_nans=True):
     return df
 
 
-def parse_all_profiles(folder="profiles", save_filename=None, gpu=0, verbose=True) -> None:
+def parse_all_profiles(folder: Union[Path, str], save_filename=None, gpu=0, verbose=True) -> None:
     """
     Parses all of the profiles under the folder into one dataframe saved as a csv in the folder.
 
@@ -223,8 +223,10 @@ def parse_all_profiles(folder="profiles", save_filename=None, gpu=0, verbose=Tru
     Model architecture and the filename are added as columns to the csv.
 
     :param folder: the folder containing subfolders by model architecture, which contain profiles,
-                        such as ./profiles/<folder>/resnet/resnet12345.csv
-    :param save_filename: the filename of the combined csv to save.
+                        such as ./profiles/<folder>/resnet/resnet12345.csv.  This can either be a 
+                        Path (if the folder is not a direct child of the directory ./profiles) or 
+                        a str (if the folder is in the ./profiles/ directory).
+    :param save_filename: the filename of the combined csv to save, default is aggregated.csv.
     :param gpu: the gpu that the profile was run on.
     :param verbose: print messages.
     :return: None, just saves a csv file.
@@ -247,9 +249,10 @@ def parse_all_profiles(folder="profiles", save_filename=None, gpu=0, verbose=Tru
             file = csv_profile.name
             if verbose:
                 print(f"\t{file}")
-            prof = parse_one_profile(csv_file=csv_profile, gpu=gpu)
-            prof = pd.Series({"file" : file, "model": model}).append(prof)
-            combined = combined.append(prof, ignore_index=True)
+            prof_first = pd.Series({"file" : file, "model": model})
+            prof_second = parse_one_profile(csv_file=csv_profile, gpu=gpu)
+            prof = pd.concat((prof_first, prof_second)).to_frame().T
+            combined = pd.concat((combined, prof), ignore_index=True, axis=0)
 
     if save_filename is None:
         save_filename = "aggregated.csv"
@@ -464,7 +467,9 @@ def read_csv(folder: Path=None, gpu: int=0) -> pd.DataFrame:
 if __name__ == '__main__':
     # a = parse_all_profiles("debug_2")
     # validate_nans("zero_noexe")
-    parse_all_profiles("zero_noexe_lots_models")
+    # parse_all_profiles("zero_noexe_lots_models")
     # validate_nvprof("zero_noexe_lots_models")
     # validate_class_balance("zero_noexe_lots_models")
+    path = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe"
+    validate_all(path)
     exit(0)
