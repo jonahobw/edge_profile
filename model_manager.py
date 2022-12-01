@@ -8,7 +8,7 @@ import datetime
 import json
 from pathlib import Path
 import time
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, List, Tuple
 import traceback
 
 import torch
@@ -27,6 +27,7 @@ from collect_profiles import run_command, generateExeName
 from utils import latest_file
 from format_profiles import parse_one_profile
 from architecture_prediction import NNArchPred
+import config
 
 
 class ModelManager:
@@ -65,6 +66,7 @@ class ModelManager:
                 (see datasets.py)
             idx (int): the index into the subset of the dataset.  0 for victim model and 1 for surrogate.
         """
+        #todo add option to not load dataset and use this option when profiling
         self.architecture = architecture
         self.data_subset_percent = data_subset_percent
         self.dataset = Dataset(dataset, data_subset_percent=data_subset_percent, idx=idx)
@@ -147,6 +149,7 @@ class ModelManager:
         Returns:
             Nothing, only sets the self.model class variable.
         """
+        # todo add checkpoint freq
         if self.trained:
             raise ValueError
 
@@ -307,6 +310,7 @@ class ModelManager:
         model_folder = (
             Path.cwd() / "models" / self.architecture / f"{self.model_name}_{time}"
         )
+        assert not model_folder.exists()
         model_folder.mkdir(parents=True)
         return model_folder
 
@@ -422,6 +426,29 @@ class ModelManager:
             "lr",
         ]
 
+    @staticmethod
+    def getModelPaths(self, prefix: str=None) -> List[Path]:
+        """
+        Return a list of paths to all victim models
+        in directory "./<prefix>".  This directory must be organized
+        by model architecture folders whose subfolders are victim model
+        folders and contain a model stored in 'checkpoint.pt'.  
+        Default prefix is ./models/
+        """
+        if prefix is None:
+            prefix = "models"
+
+        models_folder = Path.cwd() / prefix
+        arch_folders = [i for i in models_folder.glob("*")]
+        model_paths = []
+        for arch in arch_folders:
+            for model_folder in [i for i in arch.glob("*")]:
+                victim_path = models_folder / arch / model_folder / "checkpoint.pt"
+                if victim_path.exists():
+                    model_paths.append(victim_path)
+                else:
+                    print(f"Warning, no model found {victim_path}")
+        return model_paths
 
 class SurrogateModelManager(ModelManager):
     """
@@ -715,32 +742,45 @@ class SurrogateModelManager(ModelManager):
         return
 
 
-def trainOneVictim(model_arch, epochs=150, gpu=None, debug=None):
+def trainOneVictim(model_arch, epochs=150, gpu=None, debug=None) -> ModelManager:
     a = ModelManager(model_arch, "cifar10", model_arch, gpu=gpu)
     a.trainModel(num_epochs=epochs, debug=debug)
+    return a
 
 
-def trainAllVictimModels(epochs=150, gpu=None, reverse=False, debug=None, repeat=False):
+def trainVictimModels(epochs=150, gpu=None, reverse=False, debug=None, repeat=False, models: List[str]=None):
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     file_path = Path.cwd() / f"train_progress_{timestamp}.txt"
     f = open(file_path, "w")
 
-    models = all_models
+    if models is None:
+        models = all_models
     if reverse:
         models.reverse()
+    start = time.time()
 
     for i, model in enumerate(models):
+        iter_start = time.time()
         if debug and i > debug:
             break
         model_arch_folder = Path.cwd() / "models" / model
         if not repeat and model_arch_folder.exists():
             continue
         try:
-            trainOneVictim(model, epochs=epochs, gpu=gpu, debug=debug)
+            manager = trainOneVictim(model, epochs=epochs, gpu=gpu, debug=debug)
             f.write(f"{model} success\n")
+            config.EMAIL.email_update(
+                start=start,
+                iter_start=iter_start,
+                iter=i,
+                total_iters=len(models),
+                subject=f"Victim {model} Finished Training",
+                params=manager.config
+            )
         except Exception as e:
             print(e)
             f.write(f"\n\n{model} failed, error\n{e}\ntraceback:\n{traceback.format_exc()}\n\n")
+            config.EMAIL.email(f"Failed While Training {model}", f"{traceback.format_exc()}")
     f.close()
 
 
@@ -754,19 +794,33 @@ def profileAllVictimModels(gpu=0):
             model_manager.runNVProf(False)
 
 
-def trainSurrogateModels(epochs=150, gpu=0, reverse=False, debug=None):
-    nvprof_args = {"use_exe": False}
-    models_folder = Path.cwd() / "models"
-    arch_folders = [i for i in models_folder.glob("*")]
+def trainSurrogateModels(nvprof_args: dict, model_paths: List[str] = None, epochs=150, gpu=0, reverse=False, debug=None):
+    if model_paths is None:
+        model_paths = ModelManager.getModelPaths()
     if reverse:
-        arch_folders.reverse()
-    for arch in arch_folders:
-        for model_folder in [i for i in arch.glob("*")]:
-            victim_path = models_folder / arch / model_folder / "checkpoint.pt"
+        model_paths.reverse()
+    start = time.time()
+
+    for i, victim_path in enumerate(model_paths):
+        vict_name = Path(victim_path).parent.name
+        iter_start = time.time()
+        try:
             surrogate_model = SurrogateModelManager(
                 victim_path, gpu=gpu, nvprof_args=nvprof_args
             )
             surrogate_model.trainSaveAll(epochs, debug=debug)
+            config.EMAIL.email_update(
+                start=start,
+                iter_start=iter_start,
+                iter=i,
+                total_iters=len(model_paths),
+                subject=f"Surrogate Model for Victim {vict_name} Finished Training",
+                params=surrogate_model.config
+            )
+        except Exception as e:
+            vict_name = Path(victim_path).parent.name
+            print(e)
+            config.EMAIL.email(f"Failed Training Surrogate model for victim Model {vict_name}", f"{traceback.format_exc()}")
 
 
 def runTransferSurrogateModels(
