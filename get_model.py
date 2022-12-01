@@ -22,9 +22,14 @@ all_models = []
 for i in model_families:
     all_models.extend(i[1])
 
-model_kwargs = {
+model_params = {
     "googlenet": {
-        "aux_logits": False
+        "kwargs": {
+            "aux_logits": False
+        }
+    },
+    "alexnet": {
+        "input_size": 224
     }
 }
 
@@ -32,6 +37,6 @@ def get_model(model_arch:str, pretrained=False, kwargs={}):
     model_arch = model_arch.lower()
     if model_arch not in name_to_family:
         raise ValueError(f"Model {model_arch} not supported")
-    if model_arch in model_kwargs:
-        kwargs.update(model_kwargs[model_arch])
+    if model_arch in model_params:
+        kwargs.update(model_params.get(model_arch, {}).get("kwargs", {}))
     return getattr(models, model_arch)(pretrained=pretrained, **kwargs)

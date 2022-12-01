@@ -253,9 +253,9 @@ class ModelManager:
                 loss = loss_fn(yhat, y)
 
                 if train:
+                    optim.zero_grad()
                     loss.backward()
                     optim.step()
-                    optim.zero_grad()
 
                 c1, c5 = correct(yhat, y, (1, 5))
                 total_loss.add(loss.item() / len(x))
