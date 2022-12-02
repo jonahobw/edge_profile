@@ -14,7 +14,7 @@ import time
 
 from sklearn.preprocessing import StandardScaler
 
-from metrics import correct, accuracy
+from model_metrics import correct
 
 class Net(torch.nn.Module):
     def __init__(self, input_size, num_classes, hidden_layer_factor=0.5, layers=3):

@@ -18,11 +18,11 @@ from cleverhans.torch.attacks.projected_gradient_descent import (
     projected_gradient_descent,
 )
 
-from get_model import get_model, model_kwargs, all_models
+from get_model import get_model, model_params, all_models
 from datasets import Dataset
 from logger import CSVLogger
 from online import OnlineStats
-from accuracy import correct, accuracy, both_correct
+from model_metrics import correct, accuracy, both_correct
 from collect_profiles import run_command, generateExeName
 from utils import latest_file
 from format_profiles import parse_one_profile
@@ -44,8 +44,9 @@ class ModelManager:
         model_name: str,
         load: str = None,
         gpu: int = None,
-        data_subset_percent: float = None,
+        data_subset_percent: float = 0.5,
         idx: int = 0,
+        pretrained: bool = False,
     ):
         """
         Models files are stored in a folder
@@ -73,7 +74,7 @@ class ModelManager:
             dataset,
             data_subset_percent=data_subset_percent,
             idx=idx,
-            resize=model_kwargs.get(architecture, {}).get("input_size", None),
+            resize=model_params.get(architecture, {}).get("input_size", None),
         )
         self.model_name = model_name
         self.device = torch.device("cpu")
@@ -83,7 +84,9 @@ class ModelManager:
         print(
             f"Using device {self.device}, cuda available: {torch.cuda.is_available()}"
         )
-        self.model = self.constructModel()
+        # if loading a model from a file, don't need to load pretrained weights
+        self.model = self.constructModel(pretrained=(False if load else pretrained))
+        self.pretrained = pretrained
         self.trained = False
         if load:
             self.trained = True
@@ -98,6 +101,7 @@ class ModelManager:
             "model_name": self.model_name,
             "device": str(self.device),
             "data_subset_percent": data_subset_percent,
+            "pretrained": pretrained
         }
         self.epochs = 0
 
@@ -116,6 +120,7 @@ class ModelManager:
             load=folder_path,
             gpu=gpu,
             data_subset_percent=conf["data_subset_percent"],
+            pretrained=conf["pretrained"]
         )
         model_manager.config = conf
         return model_manager
@@ -136,14 +141,14 @@ class ModelManager:
         assert not model_file.exists()
         torch.save(self.model.state_dict(), model_file)
 
-    def constructModel(self) -> torch.nn.Module:
+    def constructModel(self, pretrained: bool) -> torch.nn.Module:
         model = get_model(
-            self.architecture, kwargs={"num_classes": self.dataset.num_classes}
-        )  # todo num_classes
+            self.architecture, pretrained=pretrained, kwargs={"num_classes": self.dataset.num_classes}
+        )
         model.to(self.device)
         return model
 
-    def trainModel(self, num_epochs: int, lr: float = 1e-1, debug: int = None):
+    def trainModel(self, num_epochs: int, lr: float = 1e-1, debug: int = None, patience: int = 10):
         """Trains the model using dataset self.dataset.
 
         Args:
@@ -162,10 +167,10 @@ class ModelManager:
         logger = CSVLogger(self.path, self.train_metrics)
 
         optim = torch.optim.SGD(
-            self.model.parameters(), lr=lr, momentum=0.9, nesterov=True
+            self.model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
         )
         loss_func = torch.nn.CrossEntropyLoss()
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, patience=patience)
 
         since = time.time()
         try:
@@ -471,10 +476,12 @@ class SurrogateModelManager(ModelManager):
         arch_model: str = "nn",
         load: dict = {},
         nvprof_args: dict = {},
+        pretrained: bool = False,
     ):
         """
         If load is not none, it should be a dictionary containing the model architecture,
         architecture prediction model type, architecture confidence, and path to model.
+        See SurrogateModelManager.load()
         """
         self.victim_model = ModelManager.load(victim_model_path, gpu=gpu)
         self.nvprof_args = nvprof_args
@@ -485,7 +492,7 @@ class SurrogateModelManager(ModelManager):
             self.arch_confidence = load["arch_confidence"]
             load_path = Path(load["path"])
         else:
-            self.arch_pred_model = None
+            self.arch_pred_model = None # will get set in self.predictVictimArch
             architecture, conf = self.predictVictimArch(arch_model)
             self.arch_confidence = conf
         super().__init__(
@@ -496,6 +503,7 @@ class SurrogateModelManager(ModelManager):
             load=load_path,
             data_subset_percent=self.victim_model.data_subset_percent,
             idx=1,
+            pretrained=pretrained,
         )
         if not load:
             self.config.update(
