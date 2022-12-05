@@ -14,13 +14,23 @@ from model_metrics import correct, accuracy
 from online import OnlineStats
 
 # parameters
-arch = "alexnet"
-gpu=None
-data_subset_percent = 0.1
+arch = "squeezenet1_0"
+deterministic_train = False
+gpu=1
+optim_sgd = False
+data_subset_percent = 0.5
+batch_size=128
 pretrained = False
-epochs=10
-lr = 0.1
+nesterov = True
+epochs=300
+lr = 0.0001
+plateau_lr = True
 patience = 10
+gamma = 0.75
+resize=None
+normalize=None
+#normalize = [0.4914, 0.4822, 0.4465], [0.2023, 0.1994, 0.2010]
+#normalize = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
 
 # build necessary objects
 def getDevice(gpu):
@@ -30,12 +40,16 @@ def getDevice(gpu):
     return device
 
 
-def getDataset(data_subset_percent, arch):
+def getDataset(data_subset_percent, arch, batch_size, normalize, resize):
+    if resize is None:
+        resize = model_params.get(arch, {}).get("input_size", None)
     return Dataset(
         "cifar10",
         data_subset_percent=data_subset_percent,
         idx=0,
-        resize=model_params.get(arch, {}).get("input_size", None),
+        batch_size=batch_size,
+        resize=resize,
+        normalize=normalize
     )
 
 
@@ -47,6 +61,7 @@ def getModel(arch, pretrained, dataset):
 
 def runEpoch(
     train: bool,
+    deterministic_train: bool,
     epoch: int,
     epochs: int,
     optim: torch.optim.Optimizer,
@@ -63,6 +78,8 @@ def runEpoch(
         model.train()
         prefix = "train"
         dl = dataset.train_dl
+        if deterministic_train:
+            dl = dataset.train_acc_dl
 
     total_loss = OnlineStats()
     acc1 = OnlineStats()
@@ -105,14 +122,17 @@ def runEpoch(
     top5 = acc5.mean
 
     if train and debug is None:
-        lr_scheduler.step(loss)
+        if isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            lr_scheduler.step(loss)
+        else:
+            lr_scheduler.step()
         # get actual train accuracy/loss after weights update
-        top1, top5, loss = accuracy(
-            model=model,
-            dataloader=dataset.train_acc_dl,
-            loss_func=loss_fn,
-            topk=(1, 5),
-        )
+        #top1, top5, loss = accuracy(
+        #    model=model,
+        #    dataloader=dataset.train_acc_dl,
+        #    loss_func=loss_fn,
+        #    topk=(1, 5),
+        #)
 
     return loss, top1, top5
 
@@ -120,21 +140,28 @@ def runEpoch(
 if __name__ == '__main__':
 
     device = getDevice(gpu)
-    dataset = getDataset(data_subset_percent, arch)
+    dataset = getDataset(data_subset_percent, arch, batch_size, normalize, resize)
     model = getModel(arch, pretrained, dataset)
     model.to(device)
+    model.train()
 
     # training setup
     optim = torch.optim.SGD(
-        model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
+        model.parameters(), lr=lr, momentum=0.9, nesterov=nesterov, weight_decay=1e-4
     )
-    loss_func = torch.nn.CrossEntropyLoss()
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, patience=patience)
+    if not optim_sgd:
+        optim = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4, betas=(0.9, 0.999), eps=1e-8)
 
+    loss_func = torch.nn.CrossEntropyLoss()
+
+    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, patience=patience, factor=gamma)
+    if not plateau_lr:
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=patience, gamma=gamma)
     # training
     for epoch in range(1, epochs + 1):
         runEpoch(
             train=True,
+            deterministic_train=deterministic_train,
             epoch=epoch,
             epochs=epochs,
             optim=optim,
@@ -142,10 +169,11 @@ if __name__ == '__main__':
             lr_scheduler=lr_scheduler,
         )
 
-        runEpoch(
-            train=False,
-            epoch=epoch,
-            optim=optim,
-            loss_fn=loss_func,
-            lr_scheduler=lr_scheduler,
-        )
+#        runEpoch(
+ #           train=False,
+  #          epoch=epoch,
+   #         epochs=epochs,
+    #        optim=optim,
+     #       loss_fn=loss_func,
+      #      lr_scheduler=lr_scheduler,
+       # )

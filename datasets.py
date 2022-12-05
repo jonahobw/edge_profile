@@ -2,7 +2,7 @@
 adapted from https://github.com/jonahobw/shrinkbench/blob/master/datasets/datasets.py
 """
 import pathlib
-from typing import List
+from typing import List, Tuple
 
 from torchvision import transforms, datasets
 from torch.utils.data import DataLoader, random_split
@@ -84,7 +84,7 @@ def dataset_builder(
     return _constructors[dataset](path, **kwargs)
 
 
-def MNIST(train=True, path=None, resize=None):
+def MNIST(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None):
     """Thin wrapper around torchvision.datasets.CIFAR10"""
     mean, std = 0.1307, 0.3081
     normalize = transforms.Normalize(mean=(mean,), std=(std,))
@@ -93,9 +93,11 @@ def MNIST(train=True, path=None, resize=None):
     return dataset
 
 
-def CIFAR10(train=True, path=None, deterministic=False, resize=None):
+def CIFAR10(train=True, path=None, deterministic=False, resize=None, normalize: Tuple[List[float], List[float]] = None):
     """Thin wrapper around torchvision.datasets.CIFAR10"""
     mean, std = [0.491, 0.482, 0.447], [0.247, 0.243, 0.262]
+    if normalize is not None:
+        mean, std = normalize
     normalize = transforms.Normalize(mean=mean, std=std)
     if train and not deterministic:
         preproc = [transforms.RandomHorizontalFlip(), transforms.RandomCrop(32, 4)]
@@ -106,9 +108,11 @@ def CIFAR10(train=True, path=None, deterministic=False, resize=None):
     return dataset
 
 
-def CIFAR100(train=True, path=None, resize=None):
+def CIFAR100(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None):
     """Thin wrapper around torchvision.datasets.CIFAR100"""
     mean, std = [0.507, 0.487, 0.441], [0.267, 0.256, 0.276]
+    if normalize is not None:
+        mean, std = normalize
     normalize = transforms.Normalize(mean=mean, std=std)
     if train:
         preproc = [transforms.RandomHorizontalFlip(), transforms.RandomCrop(32, 4)]
@@ -121,7 +125,7 @@ def CIFAR100(train=True, path=None, resize=None):
     return dataset
 
 
-def ImageNet(train=True, path=None, resize=None):
+def ImageNet(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None):
     """Thin wrapper around torchvision.datasets.ImageNet"""
     # ImageNet loading from files can produce benign EXIF errors
     import warnings
@@ -129,6 +133,8 @@ def ImageNet(train=True, path=None, resize=None):
     warnings.filterwarnings("ignore", "(Possibly )?corrupt EXIF data", UserWarning)
 
     mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+    if normalize is not None:
+        mean, std = normalize
     normalize = transforms.Normalize(mean=mean, std=std)
     if train:
         preproc = [transforms.RandomResizedCrop(224), transforms.RandomHorizontalFlip()]
@@ -160,6 +166,7 @@ class Dataset:
         seed: int = 42,
         idx: int = 0,
         resize: int = None,
+        normalize: Tuple[List[float], List[float]] = None,
     ) -> None:
         """
         data_subset_percent will divide the dataset into 2 pieces, and the first will have <data_subset_percent>% of the data.
@@ -170,7 +177,7 @@ class Dataset:
         self.num_classes = self.num_classes_map[self.name]
         self.data_subset_percent = data_subset_percent
 
-        self.train_data = self.name_mapping[self.name](resize=resize)
+        self.train_data = self.name_mapping[self.name](resize=resize, normalize=normalize)
         if data_subset_percent is not None:
             first_amount = int(len(self.train_data) * data_subset_percent)
             second_amount = len(self.train_data) - first_amount
@@ -187,7 +194,7 @@ class Dataset:
             num_workers=workers,
         )
 
-        self.val_data = self.name_mapping[self.name](train=False, resize=resize)
+        self.val_data = self.name_mapping[self.name](train=False, resize=resize, normalize=normalize)
         if data_subset_percent is not None:
             first_amount = int(len(self.val_data) * data_subset_percent)
             second_amount = len(self.val_data) - first_amount
@@ -207,7 +214,7 @@ class Dataset:
         self.train_acc_data = self.train_data
         if self.name == "cifar10":
             self.train_acc_data = self.name_mapping[self.name](
-                deterministic=True, resize=resize
+                deterministic=True, resize=resize, normalize=normalize
             )
             if data_subset_percent is not None:
                 first_amount = int(len(self.train_acc_data) * data_subset_percent)
@@ -233,6 +240,7 @@ class Dataset:
             "seed": seed,
             "idx": idx,
             "resize": resize,
+            "normalize": normalize
         }
 
 

@@ -29,6 +29,15 @@ from format_profiles import parse_one_profile
 from architecture_prediction import NNArchPred
 import config
 
+def loadModel(path: Path, model: torch.nn.Module, device: torch.device = None) -> None:
+    assert path.exists(), f"Model load path \n{path}\n does not exist."
+    if device is not None:
+        params = torch.load(path, map_location=device)
+    else:
+        params = torch.load(path)
+    model.load_state_dict(params, strict=False)
+    model.eval()
+
 
 class ModelManager:
     """
@@ -125,16 +134,15 @@ class ModelManager:
         model_manager.config = conf
         return model_manager
 
-    def loadModel(self) -> None:
+    def loadModel(self, name: str = None, device: torch.device = None) -> None:
         """
         Models are stored under
         self.path/checkpoint.pt
         """
-        model_file = self.path / "checkpoint.pt"
-        assert model_file.exists(), f"Model load path \n{model_file}\n does not exist."
-        params = torch.load(model_file, map_location=self.device)
-        self.model.load_state_dict(params, strict=False)
-        self.model.eval()
+        if name is None:
+            name = "checkpoint.pt"
+        model_file = self.path / name
+        loadModel(model_file, self.model, self.device)
 
     def saveModel(self) -> None:
         model_file = self.path / "checkpoint.pt"
@@ -148,13 +156,15 @@ class ModelManager:
         model.to(self.device)
         return model
 
-    def trainModel(self, num_epochs: int, lr: float = 1e-1, debug: int = None, patience: int = 10):
+    def trainModel(self, num_epochs: int, lr: float = None, debug: int = None, patience: int = 10):
         """Trains the model using dataset self.dataset.
 
         Args:
             num_epochs (int): number of training epochs
             lr (float): initial learning rate.  This function decreases the learning rate
-                by a factor of 0.1 when the loss fails to decrease by 1e-4 for 10 iterations
+                by a factor of 0.1 when the loss fails to decrease by 1e-4 for 10 iterations.
+                If not passed, will default to learning rate of model from get_model.py, and
+                if there is no learning rate specified there, defaults to 0.1.
 
         Returns:
             Nothing, only sets the self.model class variable.
@@ -163,12 +173,20 @@ class ModelManager:
         if self.trained:
             raise ValueError
 
+        if lr is None:
+            lr = model_params.get(self.architecture, {}).get("lr", None)
+            if lr is None:
+                lr = 0.1
+
         self.epochs = num_epochs
         logger = CSVLogger(self.path, self.train_metrics)
 
         optim = torch.optim.SGD(
             self.model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
         )
+        if model_params.get(self.architecture, {}).get("optim", "") == "adam":
+            optim = torch.optim.Adam(self.model.parameters, lr=lr, weight_decay=1e-4)
+        
         loss_func = torch.nn.CrossEntropyLoss()
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, patience=patience)
 
@@ -437,7 +455,7 @@ class ModelManager:
         ]
 
     @staticmethod
-    def getModelPaths(self, prefix: str = None) -> List[Path]:
+    def getModelPaths(prefix: str = None) -> List[Path]:
         """
         Return a list of paths to all victim models
         in directory "./<prefix>".  This directory must be organized
@@ -460,6 +478,104 @@ class ModelManager:
                     print(f"Warning, no model found {victim_path}")
         return model_paths
 
+
+class QuantizedModelManager:
+    def __init__(self, victim_model_path: Path, backend: str = 'fbgemm', load_path: Path = None, save_model: bool = True) -> None:
+        self.full_prec_manager = ModelManager.load(victim_model_path)
+        folder = self.full_prec_manager.path / "quantize"
+        folder.mkdir(exist_ok=True, parents=True)
+        self.path = folder
+        self.backend = backend
+        self.config = {
+            "victim_model_path": str(victim_model_path),
+            "backend": backend
+        }
+        self.model = None
+        if load_path is not None:
+            self.model = self.load_quantized_model(load_path)
+        else:
+            self.model = self.quantize()
+            if save_model:
+                self.save_model()
+    
+    def prepare_for_quantization(self, model):
+        torch.backends.quantized.engine = self.backend
+        model.eval()
+        # Make sure that weight qconfig matches that of the serialized models
+        if self.backend == 'fbgemm':
+            model.qconfig = torch.quantization.QConfig(
+                activation=torch.quantization.default_observer,
+                weight=torch.quantization.default_per_channel_weight_observer)
+        elif self.backend == 'qnnpack':
+            model.qconfig = torch.quantization.QConfig(
+                activation=torch.quantization.default_observer,
+                weight=torch.quantization.default_weight_observer)
+
+        model.fuse_model()
+        torch.quantization.prepare(model, inplace=True)
+        return model
+    
+    def quantize(self) -> torch.nn.Module:
+        prepped_model = self.prepare_for_quantization(self.full_prec_manager.model)
+        # calibrate model
+        dl_iter = tqdm(self.full_prec_manager.dataset.train_acc_dl)
+        dl_iter.set_description("Calibrating model for quantization")
+        for i, (x, y) in enumerate(dl_iter):
+            prepped_model(x)
+        torch.quantization.convert(prepped_model, inplace=True)
+        return prepped_model
+    
+    def save_model(self) -> None:
+        save_path = self.path / f"quantized.pt"
+
+        torch.save(
+            {
+                "model_state_dict": self.quantized_model.state_dict(),
+            },
+            save_path / f"quantized.pt",
+        )
+        self.saveConfig()
+        return None
+    
+    def saveConfig(self) -> None:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = self.path / f"params_{timestamp}.json"
+        with open(path, "w") as f:
+            json.dump(self.config, f, indent=4)
+
+    def load_quantized_model(self, path: Path) -> torch.nn.Module:
+        model = self.full_prec_manager.model
+        model.eval()
+
+        torch.backends.quantized.engine = self.backend
+        # Make sure that weight qconfig matches that of the serialized models
+        if self.backend == 'fbgemm':
+            model.qconfig = torch.quantization.QConfig(
+                activation=torch.quantization.default_observer,
+                weight=torch.quantization.default_per_channel_weight_observer)
+        elif self.backend == 'qnnpack':
+            model.qconfig = torch.quantization.QConfig(
+                activation=torch.quantization.default_observer,
+                weight=torch.quantization.default_weight_observer)
+
+        model.fuse_model()
+        torch.quantization.prepare(model, inplace=True)
+        torch.quantization.convert(model, inplace=True)
+
+        resume = Path(path)
+        assert resume.exists(), f"Quantized model path does not exist\n{resume}"
+        previous = torch.load(resume, map_location=torch.device('cpu'))
+        model.load_state_dict(previous["model_state_dict"], strict=False)
+        return model
+
+    @staticmethod
+    def load(quantize_folder: Path):
+        vict_model_path = quantize_folder.parent / "checkpoint.pt"
+        config = quantize_folder.glob("params_*")
+        with open(next(config), "r") as f:
+            conf = json.load(f)
+        load_path = quantize_folder / "quantized.pt"
+        return QuantizedModelManager(victim_model_path=vict_model_path, backend=conf["backend"], load_path=load_path)
 
 class SurrogateModelManager(ModelManager):
     """
@@ -527,6 +643,7 @@ class SurrogateModelManager(ModelManager):
         )
         return arch, conf
 
+    @staticmethod
     def load(model_path: str, gpu=None):
         """
         Given a path to a surrogate model, load into a SurrogateModelManager obj.
@@ -883,4 +1000,11 @@ if __name__ == "__main__":
     # profileAllVictimModels()
     # trainSurrogateModels(reverse=False, gpu=-1)
     # runTransferSurrogateModels(gpu=-1)
-    trainOneVictim("alexnet")
+    # trainOneVictim("alexnet")
+    trainVictimModels(
+        gpu=0,
+        models = ['alexnet', 'resnext50_32x4d',
+          'resnext101_32x8d', 'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19',
+          'squeezenet1_0', 'squeezenet1_1', 'mnasnet0_5', 'mnasnet0_75', 'mnasnet1_0', 'mnasnet1_3'
+          ]
+    )
