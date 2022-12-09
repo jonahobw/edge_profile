@@ -22,6 +22,8 @@ all_models = []
 for i in model_families:
     all_models.extend(i[1])
 
+quantized_models = [x for x in list(name_to_family.keys()) if hasattr(models.quantization, x)]
+
 model_params = {
     "googlenet": {
         "kwargs": {
@@ -93,8 +95,26 @@ def get_model(model_arch:str, pretrained=False, kwargs={}):
     if model_arch not in name_to_family:
         raise ValueError(f"Model {model_arch} not supported")
     if model_arch in model_params:
-        kwargs.update(model_params.get(model_arch, {}).get("kwargs", {}))
+        kwargs.update(model_params.get(model_arch).get("kwargs", {}))
     if "num_classes" in kwargs and pretrained:
         print("Cannot reset number of classes on pretrained model, will default to 1000.")
         kwargs.pop("num_classes")
+    print(f"Passing {kwargs} args to torch to construct {model_arch}")
     return getattr(models, model_arch)(pretrained=pretrained, **kwargs)
+
+
+def get_quantized_model(model_arch: str, kwargs={}):
+    """
+    Returns quantized version of the model from
+    torchvision.models.quantization.
+    If model is not supported, returns None.
+    """
+    model_arch = model_arch.lower()
+    if hasattr(models.quantization, model_arch):
+        if model_arch in model_params:
+            kwargs.update(model_params.get(model_arch).get("kwargs", {}))
+        print(f"Passing {kwargs} args to torch to construct {model_arch}")
+        return getattr(models.quantization, model_arch)(**kwargs)
+    
+    print(f"Warning, model architecture {model_arch} is not supported for quanitzation, returning None from get_quantized_model().")
+    return None

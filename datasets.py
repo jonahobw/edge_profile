@@ -148,6 +148,7 @@ def ImageNet(train=True, path=None, resize=None, normalize: Tuple[List[float], L
 
 
 class Dataset:
+    #todo implement lazy loading of datasets
 
     name_mapping = {
         "mnist": MNIST,

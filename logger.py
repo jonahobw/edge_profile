@@ -8,7 +8,7 @@ import torch
 
 class CSVLogger:
 
-    def __init__(self, folder, columns):
+    def __init__(self, folder, columns, append: bool = True):
         """General purpose CSV Logger
         Initialized with a set of columns, it then has two operations
           - set(**kwargs) - to add entries into the current row
@@ -19,14 +19,30 @@ class CSVLogger:
         """
         file = folder / "logs.csv"
         print(f"Logging results to {file}")
-        self.file = open(file, 'w')
+        file_existed = file.exists()
+        if file_existed and not append:
+            raise FileExistsError
+        self.file = open(file, 'a+')
         self.columns = columns
         self.values = {}
-
         self.writer = csv.writer(self.file)
-        self.writer.writerow(self.columns)
+
+        if not file_existed:
+            self.writer.writerow(self.columns)
         self.file.flush()
-        self.line = 0
+
+        self.to_write = []  # buffer used for future writes
+
+    def futureWrite(self, kwargs: dict):
+        """Store the call for the future"""
+        self.to_write.append(kwargs)
+    
+    def flush(self):
+        """Write all future writes (from calls to self.futureWrite())"""
+        for kwargs in self.to_write:
+            self.set(**kwargs)
+            self.update()
+        self.to_write = []
 
     def set(self, **kwargs):
         """Set value for current row
@@ -55,9 +71,3 @@ class CSVLogger:
         """Close the file descriptor for the CSV
         """
         self.file.close()
-
-
-def buildLogger(metrics, path: Path) -> CSVLogger:
-    printc(f"Logging results to {path}", color="MAGENTA")
-    path.mkdir(exist_ok=True, parents=True)
-    csvlogger = CSVLogger(path / "logs.csv", metrics)

@@ -7,7 +7,7 @@ import torch
 
 from construct_input import construct_input
 from get_model import get_model
-from model_manager import ModelManager
+from model_manager import VictimModelManager, PruneModelManager, QuantizedModelManager
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-model", type=str, default="resnet", required=False)
@@ -27,7 +27,12 @@ args = parser.parse_args()
 model = None
 if args.load_path:
     gpu = args.gpu if args.gpu >=0 else None
-    model = ModelManager.load(args.load_path, gpu).model
+    if args.load_path.find(PruneModelManager.FOLDER_NAME) >= 0:
+        model = PruneModelManager.load(model_path=args.load_path, gpu=gpu).model
+    elif args.load_path.find(QuantizedModelManager.FOLDER_NAME) >= 0:
+        model = QuantizedModelManager.load(model_path=args.load_path, gpu=gpu).model
+    else:
+        model = VictimModelManager.load(args.load_path, gpu).model
 else:
     model = get_model(args.model, pretrained=args.pretrained)
 

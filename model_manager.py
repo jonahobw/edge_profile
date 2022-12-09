@@ -4,21 +4,30 @@ Generic model training from Pytorch model zoo, used for the victim model.
 Assuming that the victim model architecture has already been found/predicted,
 the surrogate model can be trained using labels from the victim model.
 """
+
 import datetime
 import json
 from pathlib import Path
 import time
 from typing import Callable, Dict, List, Tuple
 import traceback
+from abc import ABC, abstractmethod
 
 import torch
+from torch.nn.utils import prune
 import numpy as np
 from tqdm import tqdm
 from cleverhans.torch.attacks.projected_gradient_descent import (
     projected_gradient_descent,
 )
 
-from get_model import get_model, model_params, all_models
+from get_model import (
+    get_model,
+    model_params,
+    all_models,
+    get_quantized_model,
+    quantized_models,
+)
 from datasets import Dataset
 from logger import CSVLogger
 from online import OnlineStats
@@ -26,8 +35,9 @@ from model_metrics import correct, accuracy, both_correct
 from collect_profiles import run_command, generateExeName
 from utils import latest_file
 from format_profiles import parse_one_profile
-from architecture_prediction import NNArchPred
+from architecture_prediction import NNArchPred, get_arch_pred_model
 import config
+
 
 def loadModel(path: Path, model: torch.nn.Module, device: torch.device = None) -> None:
     assert path.exists(), f"Model load path \n{path}\n does not exist."
@@ -39,124 +49,176 @@ def loadModel(path: Path, model: torch.nn.Module, device: torch.device = None) -
     model.eval()
 
 
-class ModelManager:
+class ModelManagerBase(ABC):
     """
     Generic model manager class.
     Can train a model on a dataset and save/load a model.
-    Functionality for passing data to a model and getting predictions.
+
+    Note- inheriting classes should not modify self.config until
+    after calling this constructor because this constructor will overwrite
+    self.config
+
+    This constructor leaves no footprint on the filesystem.
     """
+
+    MODEL_FILENAME = "checkpoint.pt"
 
     def __init__(
         self,
         architecture: str,
-        dataset: str,
         model_name: str,
-        load: str = None,
-        gpu: int = None,
-        data_subset_percent: float = 0.5,
-        idx: int = 0,
-        pretrained: bool = False,
-    ):
+        path: Path,
+        dataset: str,
+        data_subset_percent: float = None,
+        data_idx: int = 0,
+        gpu: int = -1,
+        save_model: bool = True,
+    ) -> None:
         """
-        Models files are stored in a folder
-        ./models/{model_architecture}/{self.name}_{date_time}/
-
-        This includes the model file, a csv documenting training, and a config file.
-
-        Args:
-            architecture (str): the exact string representation of the model architecture.
-                See get_model.py.
-            dataset (str): the name of the dataset all lowercase.
-            model_name (str): The name of the model, can be anything except don't use underscores.
-            load (str, optional): If provided, should be the absolute path to the model folder,
-                {cwd}/models/{model_architecture}/{self.name}{date_time}.  This will load the model
-                stored there.
-            data_subset_percent (float, optional): If provided, should be the fraction of the dataset
-                to use.  This will be generated determinisitcally.  Uses torch.utils.data.random_split
-                (see datasets.py)
-            idx (int): the index into the subset of the dataset.  0 for victim model and 1 for surrogate.
+        path: path to folder
         """
-        # todo add option to not load dataset and use this option when profiling
         self.architecture = architecture
-        self.data_subset_percent = data_subset_percent
-        self.dataset = Dataset(
-            dataset,
-            data_subset_percent=data_subset_percent,
-            idx=idx,
-            resize=model_params.get(architecture, {}).get("input_size", None),
-        )
         self.model_name = model_name
+        self.path = path
+        self.data_subset_percent = data_subset_percent
+        self.data_idx = data_idx
+        self.dataset = self.loadDataset(dataset)
+        self.save_model = save_model
+        self.model = None  # set by self.model=self.constructModel()
+        self.model_path = None # set by self.model=self.constructModel()
         self.device = torch.device("cpu")
-        if gpu is not None and torch.cuda.is_available():
+        if gpu >= 0 and torch.cuda.is_available():
             self.device = torch.device(f"cuda:{gpu}")
-        self.gpu = -1 if gpu is None else gpu
-        print(
-            f"Using device {self.device}, cuda available: {torch.cuda.is_available()}"
-        )
-        # if loading a model from a file, don't need to load pretrained weights
-        self.model = self.constructModel(pretrained=(False if load else pretrained))
-        self.pretrained = pretrained
-        self.trained = False
-        if load:
-            self.trained = True
-            self.path = load
-            self.loadModel()
-        else:
-            self.path = self.generateFolder()
+        self.gpu = gpu
+
         self.config = {
             "path": str(self.path),
             "architecture": self.architecture,
-            "dataset": self.dataset.name,
+            "dataset": dataset,
+            "data_subset_percent": data_subset_percent,
+            "data_idx": data_idx,
             "model_name": self.model_name,
             "device": str(self.device),
-            "data_subset_percent": data_subset_percent,
-            "pretrained": pretrained
         }
-        self.epochs = 0
 
-    @staticmethod
-    def load(model_path: Path, gpu=None):
-        """Create a ModelManager Object from a path to a model file."""
-        folder_path = Path(model_path).parent
-        config = folder_path.glob("params_*")
-        with open(next(config), "r") as f:
-            conf = json.load(f)
-        print(f"Loading {conf['architecture']} trained on {conf['dataset']}")
-        model_manager = ModelManager(
-            conf["architecture"],
-            conf["dataset"],
-            conf["model_name"],
-            load=folder_path,
-            gpu=gpu,
-            data_subset_percent=conf["data_subset_percent"],
-            pretrained=conf["pretrained"]
-        )
-        model_manager.config = conf
-        return model_manager
+        
+        self.epochs_trained = 0 # if loading a model, this gets updated in inheriting classes' constructors
+        # when victim models are loaded, they call self.loadModel, which calls
+        # self.saveConfig().  If config["epochs_trained"] = 0 when this happens,
+        # then the actual epochs_trained is overwritten.  To prevent this, we
+        # have the check below.
+        if not self.path.exists():
+            self.config["epochs_trained"] = self.epochs_trained
 
-    def loadModel(self, name: str = None, device: torch.device = None) -> None:
-        """
-        Models are stored under
-        self.path/checkpoint.pt
-        """
-        if name is None:
-            name = "checkpoint.pt"
-        model_file = self.path / name
-        loadModel(model_file, self.model, self.device)
-
-    def saveModel(self) -> None:
-        model_file = self.path / "checkpoint.pt"
-        assert not model_file.exists()
-        torch.save(self.model.state_dict(), model_file)
-
-    def constructModel(self, pretrained: bool) -> torch.nn.Module:
-        model = get_model(
-            self.architecture, pretrained=pretrained, kwargs={"num_classes": self.dataset.num_classes}
-        )
+    def constructModel(
+        self, pretrained: bool=False, quantized: bool = False, kwargs={}
+    ) -> torch.nn.Module:
+        kwargs.update({"num_classes": self.dataset.num_classes})
+        if not quantized:
+            model = get_model(self.architecture, pretrained=pretrained, kwargs=kwargs)
+        else:
+            model = get_quantized_model(self.architecture, kwargs=kwargs)
         model.to(self.device)
         return model
 
-    def trainModel(self, num_epochs: int, lr: float = None, debug: int = None, patience: int = 10):
+    def loadModel(self, path: Path) -> None:
+        assert path.exists(), f"Model load path \n{path}\n does not exist."
+        # the epochs trained should already be done from loading the config.
+        # if "_" in str(path.name):
+        #     self.epochs_trained = int(str(path.name).split("_")[1].split(".")[0])
+        params = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(params, strict=False)
+        self.model.eval()
+        self.model.to(self.device)
+        self.model_path = path
+        self.saveConfig({"model_path": str(path)})
+
+    def saveModel(self, name: str = None, epoch: int = None, replace: bool = False) -> None:
+        """
+        If epoch is passed, will append '_<epoch>' before the file extension
+        in <name>.  Example: if name="checkpoint.pt" and epoch = 10, then
+        will save as "checkpoint_10.pt".
+        If replace is true, then if the model file already exists it will be replaced.
+        If replace is false and the model file already exists, an error is raised.
+        """
+        if not self.save_model:
+            return
+        # todo add remove option
+        if name is None:
+            name = self.MODEL_FILENAME
+        if epoch is not None:
+            name = name.split(".")[0] + f"_{epoch}." + name.split(".")[1]
+        model_file = self.path / name
+        if model_file.exists():
+            if replace:
+                print(f"Replacing model {model_file}")
+                model_file.unlink()
+            else:
+                raise FileExistsError
+        torch.save(self.model.state_dict(), model_file)
+        self.model_path = model_file
+        self.saveConfig({"model_path": str(model_file)})
+
+    def loadDataset(self, name: str) -> Dataset:
+        return Dataset(
+            name,
+            data_subset_percent=self.data_subset_percent,
+            idx=self.data_idx,
+            resize=model_params.get(self.architecture, {}).get("input_size", None),
+        )
+
+    @staticmethod
+    @abstractmethod
+    def load(self, path: Path, gpu: int = -1):
+        """Abstract method"""
+
+    def saveConfig(self, args: dict = {}) -> None:
+        """
+        Write parameters to a json file.  If file exists already, then will be
+        appended to/overwritten.  If args are provided, they are added to the config file.
+        """
+        if not self.save_model:
+            return
+        self.config.update(args)
+        # look for config file
+        config_files = [x for x in self.path.glob("params_*")]
+        if len(config_files) > 1:
+            raise ValueError(f"Too many config files in path {self.path}")
+        if len(config_files) == 1:
+            with open(config_files[0], "r") as f:
+                conf = json.load(f)
+            conf.update(self.config)
+            with open(config_files[0], "w") as f:
+                json.dump(conf, f, indent=4)
+            return
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = self.path / f"params_{timestamp}.json"
+        with open(path, "w+") as f:
+            json.dump(self.config, f, indent=4)
+
+    @staticmethod
+    def loadConfig(path: Path) -> dict:
+        """path is not hardcoded as self.path so that this method can be called
+        by inheriting classes before self.path is set (which occurs when invoking
+        this class's constructor)
+        """
+        config_files = [x for x in path.glob("params_*")]
+        if len(config_files) != 1:
+            raise ValueError(
+                f"There are {len(config_files)} config files in path {path}\nThere should only be one."
+            )
+        with open(config_files[0], "r") as f:
+            conf = json.load(f)
+        return conf
+
+    def trainModel(
+        self,
+        num_epochs: int,
+        lr: float = None,
+        debug: int = None,
+        patience: int = 10,
+        replace: bool = False
+    ):
         """Trains the model using dataset self.dataset.
 
         Args:
@@ -165,30 +227,36 @@ class ModelManager:
                 by a factor of 0.1 when the loss fails to decrease by 1e-4 for 10 iterations.
                 If not passed, will default to learning rate of model from get_model.py, and
                 if there is no learning rate specified there, defaults to 0.1.
+            save_freq: how often to save model, default is only at the end. models are overwritten.
 
         Returns:
             Nothing, only sets the self.model class variable.
         """
-        # todo add checkpoint freq
-        if self.trained:
-            raise ValueError
+        # todo add checkpoint freq, also make note to flush logger when checkpointing
+        assert self.dataset is not None
+        assert self.model is not None, "Must call constructModel() first"
 
         if lr is None:
-            lr = model_params.get(self.architecture, {}).get("lr", None)
-            if lr is None:
-                lr = 0.1
+            lr = model_params.get(self.architecture, {}).get("lr", 0.1)
 
         self.epochs = num_epochs
-        logger = CSVLogger(self.path, self.train_metrics)
+        if self.save_model:
+            logger = CSVLogger(self.path, self.train_metrics)
 
         optim = torch.optim.SGD(
-            self.model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
+            self.model.parameters(),
+            lr=lr,
+            momentum=0.9,
+            nesterov=True,
+            weight_decay=1e-4,
         )
         if model_params.get(self.architecture, {}).get("optim", "") == "adam":
             optim = torch.optim.Adam(self.model.parameters, lr=lr, weight_decay=1e-4)
-        
+
         loss_func = torch.nn.CrossEntropyLoss()
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, patience=patience)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optim, patience=patience
+        )
 
         since = time.time()
         try:
@@ -222,16 +290,21 @@ class ModelManager:
                     "lr": optim.param_groups[0]["lr"],
                 }
 
-                logger.set(timestamp=time.time() - since, epoch=epoch, **metrics)
-                logger.update()
+                self.epochs_trained += 1
+                if self.save_model:
+                    # we only write to the log file once the model is saved, see below after self.saveModel()
+                    logger.futureWrite({"timestamp": time.time() - since, "epoch": self.epochs_trained, **metrics})  
 
         except KeyboardInterrupt:
             print(f"\nInterrupted at epoch {epoch}. Tearing Down")
 
         self.model.eval()
         print("Training ended, saving model.")
-        self.saveModel()
-        self.config["epochs"] = num_epochs
+        self.saveModel(replace=replace) # this function already checks self.save_model
+        if self.save_model:
+            logger.flush()  # this saves all the futureWrite() calls
+            logger.close()
+        self.config["epochs_trained"] = self.epochs_trained
         self.config["initialLR"] = lr
         self.config["finalLR"] = optim.param_groups[0]["lr"]
         self.config.update(metrics)
@@ -308,39 +381,36 @@ class ModelManager:
 
         return loss, top1, top5
 
-    def saveConfig(self, args: dict = {}):
-        """
-        Write parameters to a json file.  If file exists already, then will be
-        appended to/overwritten.  If args are provided, they are added to the config file.
-        """
-        self.config.update(args)
-        # look for config file
-        config_files = [x for x in self.path.glob("params_*")]
-        if len(config_files) > 1:
-            raise ValueError(f"Too many config files in path {self.path}")
-        if len(config_files) == 1:
-            with open(config_files[0], "r") as f:
-                conf = json.load(f)
-            conf.update(self.config)
-            with open(config_files[0], "w") as f:
-                json.dump(conf, f, indent=4)
-            return
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        path = self.path / f"params_{timestamp}.json"
-        with open(path, "w") as f:
-            json.dump(self.config, f, indent=4)
+    @property
+    def train_metrics(self) -> list:
+        """Generate the training metrics to be logged to a csv."""
+        return [
+            "epoch",
+            "timestamp",
+            "train_loss",
+            "train_acc1",
+            "train_acc5",
+            "val_loss",
+            "val_acc1",
+            "val_acc5",
+            "lr",
+        ]
 
-    def generateFolder(self) -> str:
-        """
-        Generates the model folder as ./models/model_architecture/{self.name}_{date_time}/
-        """
-        time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        model_folder = (
-            Path.cwd() / "models" / self.architecture / f"{self.model_name}_{time}"
+    def runPGD(
+        self,
+        x: torch.Tensor,
+        eps: float,
+        step_size: float,
+        iterations: int,
+        norm=np.inf,
+    ) -> torch.Tensor:
+        return projected_gradient_descent(
+            self.model, x, eps=eps, eps_iter=step_size, nb_iter=iterations, norm=norm
         )
-        assert not model_folder.exists()
-        model_folder.mkdir(parents=True)
-        return model_folder
+
+
+class ProfiledModelManager(ModelManagerBase):
+    """Extends ModelManagerBase to include support for profiling"""
 
     def runNVProf(
         self, use_exe: bool = True, seed: int = 47, n: int = 10, input: str = "0"
@@ -352,6 +422,7 @@ class ModelManager:
         Note - this function does not check for collisions in pid.
         """
         assert self.gpu >= 0
+        assert self.model_path is not None
         profile_folder = self.path / "profiles"
         profile_folder.mkdir(exist_ok=True)
         prefix = profile_folder / "profile_"
@@ -359,7 +430,7 @@ class ModelManager:
         print(f"Using executable {executable} for nvprof")
         command = (
             f"nvprof --csv --log-file {prefix}%p.csv --system-profiling on "
-            f"--profile-child-processes {executable} -gpu {self.gpu} -load_path {self.path/'checkpoint.pt'}"
+            f"--profile-child-processes {executable} -gpu {self.gpu} -load_path {self.model_path}"
             f" -seed {seed} -n {n} -input {input}"
         )
 
@@ -371,14 +442,14 @@ class ModelManager:
         while not success:
             print("\nNvprof retrying ... \n")
             time.sleep(10)
-            latest_file(profile_folder).unlink()
+            latest_file(profile_folder, "profile_").unlink()
             success, file = run_command(profile_folder, command)
             retries += 1
             if retries > 5:
                 print("Reached 5 retries, exiting...")
                 break
         if not success:
-            latest_file(profile_folder).unlink()
+            latest_file(profile_folder, "profile_").unlink()
             raise RuntimeError("Nvprof failed 5 times in a row.")
         profile_num = str(file.name).split("_")[1].split(".")[0]
         params = {
@@ -417,6 +488,7 @@ class ModelManager:
         Note - currently uses the first profile it finds,
         filters could be implemented.
         """
+        # todo add option to get profile and config by name
         profile_folder = self.path / "profiles"
         profile_config = [x for x in profile_folder.glob("params_*")]
         assert len(profile_config) > 0
@@ -427,32 +499,142 @@ class ModelManager:
         assert profile_path.exists()
         return profile_path, conf
 
-    def runPGD(
+    def predictVictimArch(self, model_type: str) -> Tuple[str, float, NNArchPred]:
+        # todo store logits vector in a dataframe including columns for profile and model type
+        # todo add option to select profile by name
+        assert self.isProfiled()
+        profile_csv, config = self.getProfile()
+        profile_features = parse_one_profile(profile_csv, gpu=config["gpu"])
+        print(f"Training architecture prediction model {model_type}")
+        arch_pred_model = get_arch_pred_model(model_type=model_type)
+        arch, conf = arch_pred_model.predict(profile_features)
+        print(
+            f"Predicted surrogate model architecture for victim model\n{self.path}\n is {arch} with {conf * 100}% confidence."
+        )
+        # format is to store results in self.config as such:
+        # {
+        #    "pred_arch": {
+        #        "nn (model type)": {
+        #            "profile_4832947.csv: [
+        #                {"pred_arch": "resnet18", "conf": 0.834593048}
+        #            ]
+        #        }
+        #    }
+        # }
+        #
+        # this way there is support for multiple predictions from the same model type on the same
+        # profile
+        prof_name = str(profile_csv.name)
+        arch_conf = {"pred_arch": arch, "conf": conf}
+        results = {prof_name: [arch_conf]}
+        if "pred_arch" not in self.config:
+            self.config["pred_arch"] = {model_type: results}
+        else:
+            if model_type not in self.config["pred_arch"]:
+                self.config["pred_arch"][model_type] = results
+            else:
+                if prof_name not in self.config["pred_arch"][model_type]:
+                    self.config["pred_arch"][model_type][prof_name] = [arch_conf]
+                else:
+                    self.config["pred_arch"][model_type][prof_name].append(arch_conf)
+        self.saveConfig()
+        return arch, conf, arch_pred_model
+
+
+class VictimModelManager(ProfiledModelManager):
+    def __init__(
         self,
-        x: torch.Tensor,
-        eps: float,
-        step_size: float,
-        iterations: int,
-        norm=np.inf,
-    ) -> torch.Tensor:
-        return projected_gradient_descent(
-            self.model, x, eps=eps, eps_iter=step_size, nb_iter=iterations, norm=norm
+        architecture: str,
+        dataset: str,
+        model_name: str,
+        load: str = None,
+        gpu: int = -1,
+        data_subset_percent: float = 0.5,
+        pretrained: bool = False,
+        save_model: bool = True,
+    ):
+        """
+        Models files are stored in a folder
+        ./models/{model_architecture}/{self.name}_{date_time}/
+
+        This includes the model file, a csv documenting training, and a config file.
+
+        Args:
+            architecture (str): the exact string representation of the model architecture.
+                See get_model.py.
+            dataset (str): the name of the dataset all lowercase.
+            model_name (str): The name of the model, can be anything except don't use underscores.
+            load (str, optional): If provided, should be the absolute path to the model folder,
+                {cwd}/models/{model_architecture}/{self.name}{date_time}.  This will load the model
+                stored there.
+            data_subset_percent (float, optional): If provided, should be the fraction of the dataset
+                to use.  This will be generated determinisitcally.  Uses torch.utils.data.random_split
+                (see datasets.py)
+            idx (int): the index into the subset of the dataset.  0 for victim model and 1 for surrogate.
+        """
+        path = self.generateFolder(load, architecture, model_name)
+        super().__init__(
+            architecture=architecture,
+            model_name=model_name,
+            path=path,
+            dataset=dataset,
+            data_subset_percent=data_subset_percent,
+            gpu=gpu,
+            save_model=save_model,
         )
 
-    @property
-    def train_metrics(self) -> list:
-        """Generate the training metrics to be logged to a csv."""
-        return [
-            "epoch",
-            "timestamp",
-            "train_loss",
-            "train_acc1",
-            "train_acc5",
-            "val_loss",
-            "val_acc1",
-            "val_acc5",
-            "lr",
-        ]
+        self.pretrained = pretrained
+        self.config["pretrained"] = pretrained
+
+        if load is None:
+            # creating the object for the first time
+            self.model = self.constructModel(pretrained=pretrained)
+            self.trained = False
+            if save_model:
+                assert not path.exists()
+                path.mkdir(parents=True)
+        else:
+            # load from previous run
+            self.model = self.constructModel(pretrained=False)
+            self.trained = True
+            self.loadModel(load)
+            # this causes stored parameters to overwrite new ones
+            self.config.update(self.loadConfig(self.path))
+            # update with the new device
+            self.config["device"] = str(self.device)
+            self.epochs_trained = self.config["epochs_trained"]
+
+        self.saveConfig()
+
+    @staticmethod
+    def load(model_path: Path, gpu: int = -1):
+        """Create a ModelManager Object from a path to a model file."""
+        folder_path = Path(model_path).parent
+        conf = ModelManagerBase.loadConfig(folder_path)
+        print(f"Loading {conf['architecture']} trained on {conf['dataset']}")
+        model_manager = VictimModelManager(
+            architecture=conf["architecture"],
+            dataset=conf["dataset"],
+            model_name=conf["model_name"],
+            load=model_path,
+            gpu=gpu,
+            data_subset_percent=conf["data_subset_percent"],
+            pretrained=conf["pretrained"],
+        )
+        model_manager.config = conf
+        return model_manager
+
+    def generateFolder(self, load: Path, architecture: str, model_name: str) -> str:
+        """
+        Generates the model folder as ./models/model_architecture/{self.name}_{date_time}/
+        """
+        if load:
+            return Path(load).parent
+        time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        model_folder = (
+            Path.cwd() / "models" / architecture / f"{model_name}_{time}"
+        )
+        return model_folder
 
     @staticmethod
     def getModelPaths(prefix: str = None) -> List[Path]:
@@ -471,7 +653,7 @@ class ModelManager:
         model_paths = []
         for arch in arch_folders:
             for model_folder in [i for i in arch.glob("*")]:
-                victim_path = models_folder / arch / model_folder / "checkpoint.pt"
+                victim_path = models_folder / arch / model_folder / VictimModelManager.MODEL_FILENAME
                 if victim_path.exists():
                     model_paths.append(victim_path)
                 else:
@@ -479,196 +661,320 @@ class ModelManager:
         return model_paths
 
 
-class QuantizedModelManager:
-    def __init__(self, victim_model_path: Path, backend: str = 'fbgemm', load_path: Path = None, save_model: bool = True) -> None:
-        self.full_prec_manager = ModelManager.load(victim_model_path)
-        folder = self.full_prec_manager.path / "quantize"
-        folder.mkdir(exist_ok=True, parents=True)
-        self.path = folder
-        self.backend = backend
-        self.config = {
-            "victim_model_path": str(victim_model_path),
-            "backend": backend
-        }
-        self.model = None
-        if load_path is not None:
-            self.model = self.load_quantized_model(load_path)
-        else:
-            self.model = self.quantize()
-            if save_model:
-                self.save_model()
-    
-    def prepare_for_quantization(self, model):
-        torch.backends.quantized.engine = self.backend
-        model.eval()
-        # Make sure that weight qconfig matches that of the serialized models
-        if self.backend == 'fbgemm':
-            model.qconfig = torch.quantization.QConfig(
-                activation=torch.quantization.default_observer,
-                weight=torch.quantization.default_per_channel_weight_observer)
-        elif self.backend == 'qnnpack':
-            model.qconfig = torch.quantization.QConfig(
-                activation=torch.quantization.default_observer,
-                weight=torch.quantization.default_weight_observer)
+class QuantizedModelManager(ProfiledModelManager):
+    FOLDER_NAME = "quantize"
+    MODEL_FILENAME = "quantized.pt"
 
-        model.fuse_model()
-        torch.quantization.prepare(model, inplace=True)
-        return model
-    
-    def quantize(self) -> torch.nn.Module:
-        prepped_model = self.prepare_for_quantization(self.full_prec_manager.model)
+    def __init__(
+        self,
+        victim_model_path: Path,
+        backend: str = "fbgemm",
+        load_path: Path = None,
+        gpu: int = -1,
+        save_model: bool = True,
+    ) -> None:
+        self.victim_manager = VictimModelManager.load(victim_model_path)
+        assert self.victim_manager.config["epochs_trained"] > 0
+        assert self.victim_manager.architecture in quantized_models
+        path = self.victim_manager.path / self.FOLDER_NAME
+        super().__init__(
+            architecture=self.victim_manager.architecture,
+            model_name=f"quantized_{self.victim_manager.architecture}",
+            path=path,
+            dataset=self.victim_manager.dataset.name,
+            data_subset_percent=self.victim_manager.data_subset_percent,
+            data_idx=self.victim_manager.data_idx,
+            gpu=gpu,
+            save_model=save_model,
+        )
+        self.backend = backend
+        self.model = self.constructModel(quantized=True)
+        if load_path is None:
+            # construct this object for the first time
+            self.quantize()
+            if save_model:
+                path.mkdir()
+                self.saveModel(self.MODEL_FILENAME)
+        else:
+            self.loadQuantizedModel(load_path)
+            # this causes stored parameters to overwrite new ones
+            self.config.update(self.loadConfig(self.path))
+            # update with the new device
+            self.config["device"] = str(self.device)
+            self.epochs_trained = self.config["epochs_trained"]
+
+        self.saveConfig(
+            {"victim_model_path": str(victim_model_path), "backend": backend}
+        )
+
+    def prepare_for_quantization(self) -> None:
+        torch.backends.quantized.engine = self.backend
+        self.model.eval()
+        # Make sure that weight qconfig matches that of the serialized models
+        if self.backend == "fbgemm":
+            self.model.qconfig = torch.quantization.QConfig(
+                activation=torch.quantization.default_observer,
+                weight=torch.quantization.default_per_channel_weight_observer,
+            )
+        elif self.backend == "qnnpack":
+            self.model.qconfig = torch.quantization.QConfig(
+                activation=torch.quantization.default_observer,
+                weight=torch.quantization.default_weight_observer,
+            )
+
+        self.model.fuse_model()
+        torch.quantization.prepare(self.model, inplace=True)
+
+    def quantize(self) -> None:
+        self.prepare_for_quantization()
         # calibrate model
-        dl_iter = tqdm(self.full_prec_manager.dataset.train_acc_dl)
+        dl_iter = tqdm(self.victim_manager.dataset.train_acc_dl)
         dl_iter.set_description("Calibrating model for quantization")
         for i, (x, y) in enumerate(dl_iter):
-            prepped_model(x)
-        torch.quantization.convert(prepped_model, inplace=True)
-        return prepped_model
-    
-    def save_model(self) -> None:
-        save_path = self.path / f"quantized.pt"
+            self.model(x)
+        torch.quantization.convert(self.model, inplace=True)
 
-        torch.save(
-            {
-                "model_state_dict": self.quantized_model.state_dict(),
-            },
-            save_path / f"quantized.pt",
-        )
-        self.saveConfig()
-        return None
-    
-    def saveConfig(self) -> None:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        path = self.path / f"params_{timestamp}.json"
-        with open(path, "w") as f:
-            json.dump(self.config, f, indent=4)
-
-    def load_quantized_model(self, path: Path) -> torch.nn.Module:
-        model = self.full_prec_manager.model
-        model.eval()
-
-        torch.backends.quantized.engine = self.backend
-        # Make sure that weight qconfig matches that of the serialized models
-        if self.backend == 'fbgemm':
-            model.qconfig = torch.quantization.QConfig(
-                activation=torch.quantization.default_observer,
-                weight=torch.quantization.default_per_channel_weight_observer)
-        elif self.backend == 'qnnpack':
-            model.qconfig = torch.quantization.QConfig(
-                activation=torch.quantization.default_observer,
-                weight=torch.quantization.default_weight_observer)
-
-        model.fuse_model()
-        torch.quantization.prepare(model, inplace=True)
-        torch.quantization.convert(model, inplace=True)
-
-        resume = Path(path)
-        assert resume.exists(), f"Quantized model path does not exist\n{resume}"
-        previous = torch.load(resume, map_location=torch.device('cpu'))
-        model.load_state_dict(previous["model_state_dict"], strict=False)
-        return model
+    def loadQuantizedModel(self, path: Path):
+        self.prepare_for_quantization()
+        torch.quantization.convert(self.model, inplace=True)
+        self.loadModel(path)
 
     @staticmethod
-    def load(quantize_folder: Path):
-        vict_model_path = quantize_folder.parent / "checkpoint.pt"
-        config = quantize_folder.glob("params_*")
-        with open(next(config), "r") as f:
-            conf = json.load(f)
-        load_path = quantize_folder / "quantized.pt"
-        return QuantizedModelManager(victim_model_path=vict_model_path, backend=conf["backend"], load_path=load_path)
+    def load(model_path: Path, gpu: int = -1):
+        """model_path is a path to the quantized model checkpoint"""
+        quantized_folder = Path(model_path).parent
+        victim_model_path = quantized_folder.parent / VictimModelManager.MODEL_FILENAME
+        conf = ModelManagerBase.loadConfig(quantized_folder)
+        return QuantizedModelManager(
+            victim_model_path=victim_model_path,
+            backend=conf["backend"],
+            load_path=model_path,
+            gpu=gpu,
+        )
 
-class SurrogateModelManager(ModelManager):
+
+class PruneModelManager(ProfiledModelManager):
+    FOLDER_NAME = "prune"
+    MODEL_FILENAME = "pruned.pt"
+
+    def __init__(
+        self,
+        victim_model_path: Path,
+        ratio: float = 0.5,
+        finetune_epochs: int = 20,
+        gpu: int = -1,
+        load_path: Path = None,
+        save_model: bool = True,
+        debug: int = None
+    ) -> None:
+        self.victim_manager = VictimModelManager.load(victim_model_path, gpu=gpu)
+        assert self.victim_manager.config["epochs_trained"] > 0
+        path = self.victim_manager.path / self.FOLDER_NAME
+        super().__init__(
+            architecture=self.victim_manager.architecture,
+            model_name=f"pruned_{self.victim_manager.architecture}",
+            path=path,
+            dataset=self.victim_manager.dataset.name,
+            data_subset_percent=self.victim_manager.data_subset_percent,
+            data_idx=self.victim_manager.data_idx,
+            gpu=gpu,
+            save_model=save_model,
+        )
+        self.ratio = ratio
+        self.finetune_epochs = finetune_epochs
+        self.model = self.constructModel()
+        self.pruned_modules = self.paramsToPrune()
+
+        if load_path is None:
+            if save_model:
+                # this must be called before self.prune() because
+                # self.prune() calls updateConfigSparsity() which
+                # assumes the path exists.
+                path.mkdir()    
+            # construct this object for the first time
+            self.prune()    # modifies self.model
+            # finetune
+            self.trainModel(finetune_epochs, debug=debug)
+        else:
+            self.loadModel(load_path)
+            # this causes stored parameters to overwrite new ones
+            self.config.update(self.loadConfig(self.path))
+            # update with the new device
+            self.config["device"] = str(self.device)
+            self.epochs_trained = self.config["epochs_trained"]
+
+        self.saveConfig(
+            {
+                "victim_model_path": str(victim_model_path),
+                "ratio": ratio,
+                "finetune_epochs": finetune_epochs,
+            }
+        )
+
+    def prune(self) -> None:
+        # modifies self.model (through self.pruned_params)
+        prune.global_unstructured(
+            self.pruned_modules,
+            pruning_method=prune.L1Unstructured,
+            amount=self.ratio,
+        )
+        self.updateConfigSparsity()
+
+    def paramsToPrune(self) -> List[Tuple[torch.nn.Module, str]]:
+        res = []
+        for _, module in self.model.named_modules():
+            if hasattr(module, "weight"):
+                res.append((module, "weight"))
+        self.pruned_modules = res
+        return res
+
+    def updateConfigSparsity(self) -> None:
+        sparsity = {"module_sparsity": {}}
+
+        pruned_mods_reformatted = {}
+        for mod, name in self.pruned_modules:
+            if mod not in pruned_mods_reformatted:
+                pruned_mods_reformatted[mod] = [name]
+            else:
+                pruned_mods_reformatted[mod].append(name)
+
+        zero_params_count = 0
+        for name, module in self.model.named_modules():
+            if module in pruned_mods_reformatted:
+                total_params = sum(p.numel() for p in module.parameters())
+                zero_params = np.sum([getattr(module, x).detach().cpu().numpy() == 0.0 for x in pruned_mods_reformatted[module]])
+                zero_params_count += zero_params
+                sparsity["module_sparsity"][name] = (
+                    100.0
+                    * float(zero_params)
+                    / float(total_params)
+                )
+            else:
+                sparsity["module_sparsity"][name] = 0.0
+
+        # get total sparsity
+        # getting total number of parameters from 
+        # https://stackoverflow.com/questions/49201236/check-the-total-number-of-parameters-in-a-pytorch-model/62764464#62764464
+        total_params = sum(dict((p.data_ptr(), p.numel()) for p in self.model.parameters()).values())
+        sparsity["total_parameters"] = int(total_params)
+        sparsity["zero_parameters"] = int(zero_params_count)
+        # the percentage of zero params
+        sparsity["total_sparsity"] = 100 * float(zero_params_count) / float(total_params)
+        self.config["sparsity"] = sparsity
+        self.saveConfig()
+
+    @staticmethod
+    def load(model_path: Path, gpu: int = -1):
+        """model_path is a path to the pruned model checkpoint"""
+
+        load_folder = Path(model_path).parent   # the prune folder
+        victim_path = load_folder.parent / VictimModelManager.MODEL_FILENAME
+        conf = ModelManagerBase.loadConfig(load_folder)
+        return PruneModelManager(
+            victim_model_path=victim_path,
+            ratio=conf["ratio"],
+            finetune_epochs=conf["finetune_epochs"],
+            gpu=gpu,
+            load_path=model_path,
+        )
+
+
+class SurrogateModelManager(ModelManagerBase):
     """
     Constructs the surrogate model with a paired victim model, trains using from the labels from victim
     model.
     """
-
-    arch_model = {"nn": NNArchPred}
+    FOLDER_NAME = "surrogate"
 
     def __init__(
         self,
-        victim_model_path: str,
-        gpu: int = None,
-        arch_model: str = "nn",
-        load: dict = {},
+        victim_model_path: Path,
         nvprof_args: dict = {},
-        pretrained: bool = False,
+        arch_pred_model_name: str = "nn",
+        load_path: Path = None,
+        gpu: int = -1,
+        save_model: bool = True,
     ):
         """
-        If load is not none, it should be a dictionary containing the model architecture,
-        architecture prediction model type, architecture confidence, and path to model.
-        See SurrogateModelManager.load()
+        If load_path is not none, it should be a path to model.
+        See SurrogateModelManager.load().
+
+        Note - the self.config only accounts for keeping track of one history of
+        victim model architecture prediction.
         """
-        self.victim_model = ModelManager.load(victim_model_path, gpu=gpu)
+        self.victim_model = self.loadVictim(victim_model_path, gpu=gpu)
+        if isinstance(self.victim_model, VictimModelManager):
+            assert self.victim_model.config["epochs_trained"] > 0
         self.nvprof_args = nvprof_args
-        load_path = None
-        if load:
-            self.arch_pred_model = load["arch_pred_model"]
-            architecture = load["architecture"]
-            self.arch_confidence = load["arch_confidence"]
-            load_path = Path(load["path"])
-        else:
-            self.arch_pred_model = None # will get set in self.predictVictimArch
-            architecture, conf = self.predictVictimArch(arch_model)
+        self.arch_pred_model_name = arch_pred_model_name
+        self.arch_pred_model = None
+        path = self.victim_model.path / self.FOLDER_NAME
+        if load_path is None:
+            # creating this object for the first time
+            if not self.victim_model.isProfiled():
+                self.victim_model.runNVProf(**nvprof_args)
+            architecture, conf, arch_pred_model = self.victim_model.predictVictimArch(
+                arch_pred_model_name
+            )
+            self.arch_pred_model = arch_pred_model
             self.arch_confidence = conf
+            if save_model:
+                assert not path.exists()
+                path.mkdir(parents=True)
+        else:
+            # load from a previous run
+            folder = load_path.parent
+            config = self.loadConfig(folder)
+            architecture = config["architecture"]
+            self.arch_confidence = config["arch_confidence"]
         super().__init__(
             architecture=architecture,
-            dataset=self.victim_model.dataset.name,
             model_name=f"surrogate_{self.victim_model.model_name}_{architecture}",
-            gpu=gpu,
-            load=load_path,
+            path=path,
+            dataset=self.victim_model.dataset.name,
             data_subset_percent=self.victim_model.data_subset_percent,
-            idx=1,
-            pretrained=pretrained,
+            data_idx=1,
+            gpu=gpu,
+            save_model=save_model,
         )
-        if not load:
-            self.config.update(
-                {
-                    "arch_pred_model": arch_model,
-                    "arch_confidence": conf,
-                    "nvprof_args": nvprof_args,
-                }
-            )
-
-    def predictVictimArch(self, model_type: str):
-        if not self.victim_model.isProfiled():
-            self.victim_model.runNVProf(**self.nvprof_args)
-        profile_csv, config = self.victim_model.getProfile()
-        profile_features = parse_one_profile(profile_csv, gpu=config["gpu"])
-        print(f"Training architecture prediction model {model_type}")
-        self.arch_pred_model = self.arch_model[model_type]()
-        arch, conf = self.arch_pred_model.predict(profile_features)
-        print(
-            f"Predicted surrogate model architecture for victim model\n{self.victim_model.path}\n is {arch} with {conf * 100}% confidence."
+        self.model = self.constructModel()
+        if load_path is not None:
+            self.loadModel(load_path)
+            # this causes stored parameters to overwrite new ones
+            self.config.update(self.loadConfig(self.path))
+            # update with the new device
+            self.config["device"] = str(self.device)
+            self.epochs_trained = self.config["epochs_trained"]
+        self.saveConfig(
+            {
+                "victim_model_path": str(victim_model_path),
+                "nvprof_args": nvprof_args,
+                "arch_pred_model_name": arch_pred_model_name,
+                "arch_confidence": self.arch_confidence,
+            }
         )
-        return arch, conf
 
     @staticmethod
-    def load(model_path: str, gpu=None):
+    def load(model_path: str, gpu: int = -1):
         """
-        Given a path to a surrogate model, load into a SurrogateModelManager obj.
-        Surrogate models are stored in {victim_model_path}/surrogate/checkpoint.pt
+        Given a path to a victim model, which could be a model from
+        VictimModelManager, PruneModelManager, or QuantizeModelManager, 
+        load into a SurrogateModelManager obj.
+        Victim models are stored in {victim_model_path}/checkpoint.pt
+        Surrogate models are stored under {victim_model_path}/surrogate/checkpoint.pt
         """
-        surrogate_folder = Path(model_path).parent
-        victim_model_path = surrogate_folder.parent / "checkpoint.pt"
-        surrogate_config = surrogate_folder.glob("params_*")
-        with open(next(surrogate_config), "r") as f:
-            conf = json.load(f)
-        surrogate_manager = SurrogateModelManager(victim_model_path, gpu, load=conf)
-        surrogate_manager.config.update(conf)
+        load_folder = Path(model_path).parent / SurrogateModelManager.FOLDER_NAME
+        load_path = load_folder / SurrogateModelManager.MODEL_FILENAME
+        conf = ModelManagerBase.loadConfig(load_folder)
+        surrogate_manager = SurrogateModelManager(
+            victim_model_path=model_path,
+            nvprof_args=conf["nvprof_args"],
+            arch_pred_model_name=conf["arch_pred_model_name"],
+            load_path=load_path,
+            gpu=gpu,
+        )
         print(f"Loaded surrogate model\n{model_path}\n")
         return surrogate_manager
-
-    def generateFolder(self) -> str:
-        folder = self.victim_model.path / "surrogate"
-        folder.mkdir()
-        return folder
-
-    def trainSaveAll(self, num_epochs: int, lr: float = 1e-1, debug: int = None):
-        """Wrapper around trainModel to add some more config data."""
-        self.trainModel(num_epochs, lr, debug)
-        self.config["victim_config"] = self.victim_model.config
-        self.saveConfig()
 
     def runEpoch(
         self,
@@ -715,9 +1021,9 @@ class SurrogateModelManager(ModelManager):
                 yhat = self.model(x)
                 if train:
                     loss = train_loss(yhat, victim_yhat)
+                    optim.zero_grad()
                     loss.backward()
                     optim.step()
-                    optim.zero_grad()
                 else:
                     loss = loss_fn(yhat, y)
 
@@ -836,7 +1142,7 @@ class SurrogateModelManager(ModelManager):
                 victim_acc5=victim_acc5.mean,
             )
 
-            if self.debug is not None and i == self.debug:
+            if debug is not None and i == debug:
                 break
 
         results["both_correct1"] = results["both_correct1"] / results["inputs_tested"]
@@ -865,26 +1171,48 @@ class SurrogateModelManager(ModelManager):
         }
 
         print(json.dumps(results, indent=4))
-        if "transfer_results" not in self.config:
-            self.config["transfer_results"] = {f"{data}_results": results}
-        else:
-            self.config["transfer_results"][f"{data}_results"] = results
-        self.saveConfig()
+        if debug is None or 1:
+            if "transfer_results" not in self.config:
+                self.config["transfer_results"] = {f"{data}_results": results}
+            else:
+                self.config["transfer_results"][f"{data}_results"] = results
+            self.saveConfig()
         return
 
+    def loadVictim(self, victim_model_path: str, gpu: int):
+        victim_folder = Path(victim_model_path).parent
+        if victim_folder.name == PruneModelManager.FOLDER_NAME:
+            return PruneModelManager.load(model_path=victim_model_path, gpu=gpu)
+        if victim_folder.name == QuantizedModelManager.FOLDER_NAME:
+            return QuantizedModelManager.load(model_path=victim_model_path, gpu=gpu)
+        return VictimModelManager.load(model_path=victim_model_path, gpu=gpu)
 
-def trainOneVictim(model_arch, epochs=150, gpu=None, debug=None) -> ModelManager:
-    a = ModelManager(model_arch, "cifar10", model_arch, gpu=gpu)
+
+def trainOneVictim(
+    model_arch, epochs=150, gpu: int = -1, debug: int = None, save_model: bool = True
+) -> VictimModelManager:
+    a = VictimModelManager(
+        architecture=model_arch,
+        dataset="cifar10",
+        model_name=model_arch,
+        gpu=gpu,
+        save_model=save_model,
+    )
     a.trainModel(num_epochs=epochs, debug=debug)
     return a
 
 
+def continueVictimTrain(vict_path: Path, epochs: int = 1, gpu: int = -1, debug: int = None):
+    manager = VictimModelManager.load(model_path=vict_path, gpu=gpu)
+    manager.trainModel(num_epochs=epochs, debug=debug, replace=True)
+
+
 def trainVictimModels(
     epochs=150,
-    gpu=None,
-    reverse=False,
-    debug=None,
-    repeat=False,
+    gpu: int = -1,
+    reverse: bool = False,
+    debug: int = None,
+    repeat: bool = False,
     models: List[str] = None,
 ):
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -926,14 +1254,12 @@ def trainVictimModels(
     f.close()
 
 
-def profileAllVictimModels(gpu=0):
-    models_folder = Path.cwd() / "models"
-    arch_folders = [i for i in models_folder.glob("*")]
-    for arch in arch_folders:
-        for model_folder in [i for i in arch.glob("*")]:
-            path = models_folder / arch / model_folder / "checkpoint.pt"
-            model_manager = ModelManager.load(path, gpu=gpu)
-            model_manager.runNVProf(False)
+def profileAllVictimModels(gpu: int = 0, prefix: str = None, nvprof_args: dict = {}):
+    """Victim models must be trained already."""
+    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
+        vict_manager = VictimModelManager.load(model_path=vict_path, gpu=gpu)
+        assert vict_manager.config["epochs_trained"] > 0
+        vict_manager.runNVProf(**nvprof_args)
 
 
 def trainSurrogateModels(
@@ -943,9 +1269,11 @@ def trainSurrogateModels(
     gpu=0,
     reverse=False,
     debug=None,
+    save_model: bool = True,
 ):
+    """Victim models must be trained already."""
     if model_paths is None:
-        model_paths = ModelManager.getModelPaths()
+        model_paths = VictimModelManager.getModelPaths()
     if reverse:
         model_paths.reverse()
     start = time.time()
@@ -955,9 +1283,12 @@ def trainSurrogateModels(
         iter_start = time.time()
         try:
             surrogate_model = SurrogateModelManager(
-                victim_path, gpu=gpu, nvprof_args=nvprof_args
+                victim_model_path=victim_path,
+                nvprof_args=nvprof_args,
+                gpu=gpu,
+                save_model=save_model,
             )
-            surrogate_model.trainSaveAll(epochs, debug=debug)
+            surrogate_model.trainModel(num_epochs=epochs, debug=debug)
             config.EMAIL.email_update(
                 start=start,
                 iter_start=iter_start,
@@ -976,23 +1307,68 @@ def trainSurrogateModels(
 
 
 def runTransferSurrogateModels(
-    gpu=0, eps=0.031372549, step_size=0.0078431, iterations=10, train_data: bool = True
+    prefix: str = None,
+    gpu=0,
+    eps=0.031372549,
+    step_size=0.0078431,
+    iterations=10,
+    train_data: bool = True,
+    debug: int = None,
 ):
-    models_folder = Path.cwd() / "models"
-    arch_folders = [i for i in models_folder.glob("*")]
-    for arch in arch_folders:
-        for model_folder in [i for i in arch.glob("*")]:
-            surrogate_path = (
-                models_folder / arch / model_folder / "surrogate" / "checkpoint.pt"
-            )
-            if surrogate_path.exists():
-                surrogate_model = SurrogateModelManager.load(surrogate_path, gpu=gpu)
-                surrogate_model.transferAttackPGD(
-                    eps=eps,
-                    step_size=step_size,
-                    iterations=iterations,
-                    train_data=train_data,
-                )
+    """Both surrogate and victim models must be trained already."""
+    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
+        surrogate_manager = SurrogateModelManager.load(model_path=vict_path, gpu=gpu)
+        surrogate_manager.transferAttackPGD(
+            eps=eps,
+            step_size=step_size,
+            iterations=iterations,
+            train_data=train_data,
+            debug=debug,
+        )
+
+
+def quantizeVictimModels(save: bool = True, prefix: str = None):
+    """Victim models must be trained already"""
+    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
+        arch = vict_path.parent.parent.name
+        if arch in quantized_models:
+            print(f"Quantizing {arch}...")
+            QuantizedModelManager(victim_model_path=vict_path, save_model=save)
+
+
+def pruneOneVictim(
+    vict_path: Path,
+    ratio: float = 0.5,
+    finetune_epochs: int = 20,
+    gpu: int = -1,
+    save: bool = True,
+):
+    """Victim models must be trained already"""
+    prune_manager = PruneModelManager(
+        victim_model_path=vict_path,
+        ratio=ratio,
+        finetune_epochs=finetune_epochs,
+        gpu=gpu,
+        save_model=save,
+    )
+
+
+def pruneVictimModels(
+    prefix: str = None,
+    ratio: float = 0.5,
+    finetune_epochs: int = 20,
+    gpu: int = -1,
+    save: bool = True,
+):
+    """Victim models must be trained already"""
+    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
+        pruneOneVictim(
+            vict_path=vict_path,
+            ratio=ratio,
+            finetune_epochs=finetune_epochs,
+            gpu=gpu,
+            save=save,
+        )
 
 
 if __name__ == "__main__":
@@ -1001,10 +1377,25 @@ if __name__ == "__main__":
     # trainSurrogateModels(reverse=False, gpu=-1)
     # runTransferSurrogateModels(gpu=-1)
     # trainOneVictim("alexnet")
-    trainVictimModels(
-        gpu=0,
-        models = ['alexnet', 'resnext50_32x4d',
-          'resnext101_32x8d', 'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19',
-          'squeezenet1_0', 'squeezenet1_1', 'mnasnet0_5', 'mnasnet0_75', 'mnasnet1_0', 'mnasnet1_3'
-          ]
-    )
+    # trainVictimModels(
+    #     gpu=0,
+    #     models = ['alexnet', 'resnext50_32x4d',
+    #       'resnext101_32x8d', 'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19',
+    #       'squeezenet1_0', 'squeezenet1_1', 'mnasnet0_5', 'mnasnet0_75', 'mnasnet1_0', 'mnasnet1_3'
+    #       ]
+    # )
+    
+    #trainOneVictim(model_arch="mobilenet_v2", epochs=1, debug=1, save_model=False)
+    
+    # path = [x for x in VictimModelManager.getModelPaths() if str(x).find("mobilenet_v2") >= 0][0]
+    # quant_manager = QuantizedModelManager(victim_model_path=path, save_model=False)
+
+    # continueVictimTrain(path, debug=1)
+    # surrogate_manager = SurrogateModelManager(victim_model_path=path, save_model=True)
+    # surrogate_manager.trainModel(num_epochs=1, debug=1)
+    # surrogate_manager = SurrogateModelManager.load(path)
+    # surrogate_manager.trainModel(num_epochs=2, debug=2, replace=True)
+
+    # surrogate_manager.transferAttackPGD(eps=8/255, step_size=2/255, iterations=10, debug=1)
+    exit(0)
+    

@@ -16,6 +16,10 @@ from data_engineering import shared_data, get_data_and_labels, all_data, add_ind
 from neural_network import Net
 from config import SYSTEM_SIGNALS
 
+def get_arch_pred_model(model_type, kwargs: dict = {}):
+    arch_model = {"nn": NNArchPred}
+    return arch_model[model_type](**kwargs)
+
 class NNArchPred:
 
     def __init__(self, df=None, label = "model", verbose=True):
