@@ -251,7 +251,7 @@ class ModelManagerBase(ABC):
             weight_decay=1e-4,
         )
         if model_params.get(self.architecture, {}).get("optim", "") == "adam":
-            optim = torch.optim.Adam(self.model.parameters, lr=lr, weight_decay=1e-4)
+            optim = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-4)
 
         loss_func = torch.nn.CrossEntropyLoss()
         lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -442,7 +442,9 @@ class ProfiledModelManager(ModelManagerBase):
         while not success:
             print("\nNvprof retrying ... \n")
             time.sleep(10)
-            latest_file(profile_folder, "profile_").unlink()
+            profile_file = latest_file(profile_folder, "profile_")
+            if profile_file is not None and profile_file.exists():
+                profile_file.unlink()
             success, file = run_command(profile_folder, command)
             retries += 1
             if retries > 5:
@@ -891,6 +893,7 @@ class SurrogateModelManager(ModelManagerBase):
         victim_model_path: Path,
         nvprof_args: dict = {},
         arch_pred_model_name: str = "nn",
+        pretrained: bool = False,
         load_path: Path = None,
         gpu: int = -1,
         save_model: bool = True,
@@ -909,6 +912,7 @@ class SurrogateModelManager(ModelManagerBase):
         self.arch_pred_model_name = arch_pred_model_name
         self.arch_pred_model = None
         path = self.victim_model.path / self.FOLDER_NAME
+        self.pretrained = pretrained
         if load_path is None:
             # creating this object for the first time
             if not self.victim_model.isProfiled():
@@ -937,7 +941,7 @@ class SurrogateModelManager(ModelManagerBase):
             gpu=gpu,
             save_model=save_model,
         )
-        self.model = self.constructModel()
+        self.model = self.constructModel(pretrained=self.pretrained)
         if load_path is not None:
             self.loadModel(load_path)
             # this causes stored parameters to overwrite new ones
@@ -945,12 +949,14 @@ class SurrogateModelManager(ModelManagerBase):
             # update with the new device
             self.config["device"] = str(self.device)
             self.epochs_trained = self.config["epochs_trained"]
+            self.pretrained = self.config["pretrained"]
         self.saveConfig(
             {
                 "victim_model_path": str(victim_model_path),
                 "nvprof_args": nvprof_args,
                 "arch_pred_model_name": arch_pred_model_name,
                 "arch_confidence": self.arch_confidence,
+                "pretrained": self.pretrained,
             }
         )
 
@@ -1171,7 +1177,7 @@ class SurrogateModelManager(ModelManagerBase):
         }
 
         print(json.dumps(results, indent=4))
-        if debug is None or 1:
+        if debug is None:
             if "transfer_results" not in self.config:
                 self.config["transfer_results"] = {f"{data}_results": results}
             else:
@@ -1377,13 +1383,15 @@ if __name__ == "__main__":
     # trainSurrogateModels(reverse=False, gpu=-1)
     # runTransferSurrogateModels(gpu=-1)
     # trainOneVictim("alexnet")
-    # trainVictimModels(
-    #     gpu=0,
-    #     models = ['alexnet', 'resnext50_32x4d',
-    #       'resnext101_32x8d', 'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19',
-    #       'squeezenet1_0', 'squeezenet1_1', 'mnasnet0_5', 'mnasnet0_75', 'mnasnet1_0', 'mnasnet1_3'
-    #       ]
-    # )
+    trainVictimModels(
+        gpu=0,
+        models = ['alexnet', 'resnext50_32x4d',
+          'resnext101_32x8d', 'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19',
+          'squeezenet1_0', 'squeezenet1_1', 'mnasnet0_5', 'mnasnet0_75', 'mnasnet1_0', 'mnasnet1_3'
+          ]
+    )
+    time.sleep(100)
+    profileAllVictimModels()
     
     #trainOneVictim(model_arch="mobilenet_v2", epochs=1, debug=1, save_model=False)
     

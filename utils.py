@@ -20,6 +20,9 @@ def latest_file(path: Path, pattern: str = "*") -> Path:
     """Return the latest file in the folder <path>"""
     # source https://stackoverflow.com/questions/39327032/how-to-get-the-latest-file-in-a-folder
     files = path.glob(pattern)
+    if len(files) == 0:
+        print(f"Warning: no files with pattern {pattern} found in folder {path}")
+        return None
     return max(files, key=lambda x: x.stat().st_ctime)
 
 def dict_to_str(dictionary, indent: int = 4) -> str:
