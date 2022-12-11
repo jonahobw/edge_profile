@@ -9,7 +9,7 @@ from tqdm import tqdm
 sys.path.append('../edge_profile')
 
 from datasets import Dataset
-from get_model import model_params, get_model
+from get_model import getModelParams, get_model
 from model_metrics import correct, accuracy
 from online import OnlineStats
 
@@ -42,7 +42,7 @@ def getDevice(gpu):
 
 def getDataset(data_subset_percent, arch, batch_size, normalize, resize):
     if resize is None:
-        resize = model_params.get(arch, {}).get("input_size", None)
+        resize = getModelParams(arch).get("input_size", None)
     return Dataset(
         "cifar10",
         data_subset_percent=data_subset_percent,

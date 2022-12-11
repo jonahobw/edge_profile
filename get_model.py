@@ -24,78 +24,81 @@ for i in model_families:
 
 quantized_models = [x for x in list(name_to_family.keys()) if hasattr(models.quantization, x)]
 
-model_params = {
-    "googlenet": {
-        "kwargs": {
-            "aux_logits": False
-        }
-    },
-    "alexnet": {
-        "input_size": 224,
-        "lr": 0.01
-    },
-    "resnext50_32x4d": {
-        "lr": 0.01
-    },
-    "resnext101_32x8d": {
-        "lr": 0.01
-    },
-    "squeezenet1_0": {
-        "lr": 0.0001,
-        "optim": "adam"
-    },
-    "squeezenet1_1": {
-        "lr": 0.0001,
-        "optim": "adam"
-    },
-    "vgg11": {
-        "lr": 0.01
-    }, 
-    "vgg13": {
-        "lr": 0.01
-    }, 
-    "vgg16": {
-        "lr": 0.01
-    }, 
-    "vgg19": {
-        "lr": 0.01
-    },   
-    "vgg11_bn": {
-        "lr": 0.01
-    }, 
-    "vgg13_bn": {
-        "lr": 0.01
-    }, 
-    "vgg16_bn": {
-        "lr": 0.01
-    }, 
-    "vgg19_bn": {
-        "lr": 0.01
-    },
-    "mnasnet0_5": {
-        "lr": 0.001,
-        "input_size": 224
-    }, 
-    "mnasnet0_75": {
-        "lr": 0.001,
-        "input_size": 224
-    }, 
-    "mnasnet1_0": {
-        "lr": 0.001,
-        "input_size": 224
-    }, 
-    "mnasnet1_3": {
-        "lr": 0.001,
-        "input_size": 224
-    }, 
-}
+def getModelParams(model_arch: str):
+    model_params = {
+        "googlenet": {
+            "kwargs": {
+                "aux_logits": False
+            }
+        },
+        "alexnet": {
+            "input_size": 224,
+            "lr": 0.01
+        },
+        "resnext50_32x4d": {
+            "lr": 0.01
+        },
+        "resnext101_32x8d": {
+            "lr": 0.01
+        },
+        "squeezenet1_0": {
+            "lr": 0.0001,
+            "optim": "adam"
+        },
+        "squeezenet1_1": {
+            "lr": 0.0001,
+            "optim": "adam"
+        },
+        "vgg11": {
+            "lr": 0.01
+        }, 
+        "vgg13": {
+            "lr": 0.01
+        }, 
+        "vgg16": {
+            "lr": 0.01
+        }, 
+        "vgg19": {
+            "lr": 0.01
+        },   
+        "vgg11_bn": {
+            "lr": 0.01
+        }, 
+        "vgg13_bn": {
+            "lr": 0.01
+        }, 
+        "vgg16_bn": {
+            "lr": 0.01
+        }, 
+        "vgg19_bn": {
+            "lr": 0.01
+        },
+        "mnasnet0_5": {
+            "lr": 0.001,
+            "input_size": 224
+        }, 
+        "mnasnet0_75": {
+            "lr": 0.001,
+            "input_size": 224
+        }, 
+        "mnasnet1_0": {
+            "lr": 0.001,
+            "input_size": 224
+        }, 
+        "mnasnet1_3": {
+            "lr": 0.001,
+            "input_size": 224
+        }, 
+    }
+    return model_params.get(model_arch, {})
 
 def get_model(model_arch:str, pretrained=False, kwargs={}):
     model_arch = model_arch.lower()
     if model_arch not in name_to_family:
         raise ValueError(f"Model {model_arch} not supported")
-    if model_arch in model_params:
-        kwargs.update(model_params.get(model_arch).get("kwargs", {}))
+    model_params = getModelParams(model_arch)
+    if "kwargs" in model_params:
+        kwargs.update(model_params["kwargs"])
     if "num_classes" in kwargs and pretrained:
         print("Cannot reset number of classes on pretrained model, will default to 1000.")
         kwargs.pop("num_classes")
@@ -111,8 +114,9 @@ def get_quantized_model(model_arch: str, kwargs={}):
     """
     model_arch = model_arch.lower()
     if hasattr(models.quantization, model_arch):
-        if model_arch in model_params:
-            kwargs.update(model_params.get(model_arch).get("kwargs", {}))
+        model_params = getModelParams(model_arch)
+        if "kwargs" in model_params:
+            kwargs.update(model_params["kwargs"])
         print(f"Passing {kwargs} args to torch to construct {model_arch}")
         return getattr(models.quantization, model_arch)(**kwargs)
     

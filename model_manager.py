@@ -12,6 +12,7 @@ import time
 from typing import Callable, Dict, List, Tuple
 import traceback
 from abc import ABC, abstractmethod
+import shutil
 
 import torch
 from torch.nn.utils import prune
@@ -23,7 +24,7 @@ from cleverhans.torch.attacks.projected_gradient_descent import (
 
 from get_model import (
     get_model,
-    model_params,
+    getModelParams,
     all_models,
     get_quantized_model,
     quantized_models,
@@ -164,7 +165,7 @@ class ModelManagerBase(ABC):
             name,
             data_subset_percent=self.data_subset_percent,
             idx=self.data_idx,
-            resize=model_params.get(self.architecture, {}).get("input_size", None),
+            resize=getModelParams(self.architecture).get("input_size", None),
         )
 
     @staticmethod
@@ -237,7 +238,7 @@ class ModelManagerBase(ABC):
         assert self.model is not None, "Must call constructModel() first"
 
         if lr is None:
-            lr = model_params.get(self.architecture, {}).get("lr", 0.1)
+            lr = getModelParams(self.architecture).get("lr", 0.1)
 
         self.epochs = num_epochs
         if self.save_model:
@@ -250,7 +251,7 @@ class ModelManagerBase(ABC):
             nesterov=True,
             weight_decay=1e-4,
         )
-        if model_params.get(self.architecture, {}).get("optim", "") == "adam":
+        if getModelParams(self.architecture).get("optim", "") == "adam":
             optim = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-4)
 
         loss_func = torch.nn.CrossEntropyLoss()
@@ -500,6 +501,23 @@ class ProfiledModelManager(ModelManagerBase):
         profile_path = profile_folder / f"profile_{prof_num}.csv"
         assert profile_path.exists()
         return profile_path, conf
+    
+    def getAllProfiles(self) -> List[Tuple[Path, Dict]]:
+        """Returns a list of tuples (path to profile_{pid}.csv,
+        dictionary obtained from reading params_{pid}.json) for
+        every profile in self.path/profiles"""
+        result = []
+        profile_folder = self.path / "profiles"
+        profile_configs = [x for x in profile_folder.glob("params_*")]
+        for config_file in profile_configs:
+            with open(config_file, "r") as f:
+                conf = json.load(f)
+            prof_num = conf["profile_number"]
+            profile_path = profile_folder / f"profile_{prof_num}.csv"
+            if profile_path.exists():
+                result.append((profile_path, conf))
+        return result
+
 
     def predictVictimArch(self, model_type: str) -> Tuple[str, float, NNArchPred]:
         # todo store logits vector in a dataframe including columns for profile and model type
@@ -1377,17 +1395,62 @@ def pruneVictimModels(
         )
 
 
+def loadProfilesToFolder(prefix: str="models", folder_name: str = "all_profiles", replace: bool = False):
+    """
+    For every victim model, loads all the profiles into cwd/prefix/name/
+    which is organized by model folder
+    Additionally creates a config json file where the keys are the paths to the profiles
+    and the values are dicts of information about the profile such as path to actual profile,
+    actual model architecture and architecture family, and model name.
+    """
+    config_name = "config.json"
+    all_config = {}
+
+    folder = Path.cwd() / prefix / folder_name
+    if folder.exists():
+        if not replace:
+            raise FileExistsError
+        shutil.rmtree(folder)
+    folder.mkdir(exist_ok=True)
+
+    file_count = 0
+
+    vict_model_paths = VictimModelManager.getModelPaths(prefix=prefix)
+    for vict_path in vict_model_paths:
+        manager = VictimModelManager.load(vict_path)
+        profiles = manager.getAllProfiles()
+        for profile_path, config in profiles:
+            config["model"] = manager.architecture
+            new_name = f"profile_{manager.architecture}_{file_count}.csv"
+            new_path = folder / new_name
+            shutil.copy(profile_path, new_path)
+            file_count += 1
+            all_config[new_name] = config
+        
+
+
+# def predictVictimArchs(model, prefix: str="models", name: str = "all_profiles.csv", save: bool = True):
+#     """For every profile for every victim model, predict it's architecture."""
+
+#     if save:
+#         # create folder
+#         folder = Path.cwd() / prefix / name.split(".")[0]
+#         folder.mkdir(exist_ok=True)
+
+#     vict_model_paths = VictimModelManager.getModelPaths(prefix=prefix)
+
+
 if __name__ == "__main__":
     # trainAllVictimModels(1, debug=2, reverse=True)
     # profileAllVictimModels()
     # trainSurrogateModels(reverse=False, gpu=-1)
     # runTransferSurrogateModels(gpu=-1)
     # trainOneVictim("alexnet")
-    trainVictimModels(
-        gpu=0,
-        models = ['squeezenet1_0', 'squeezenet1_1']
-    )
-    time.sleep(100)
+    # trainVictimModels(
+    #     gpu=0,
+    #     models = ['squeezenet1_0', 'squeezenet1_1']
+    # )
+    # time.sleep(100)
     profileAllVictimModels()
     
     #trainOneVictim(model_arch="mobilenet_v2", epochs=1, debug=1, save_model=False)

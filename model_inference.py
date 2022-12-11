@@ -24,15 +24,22 @@ parser.add_argument("-load_path", default=None, required=False, help="Provide a 
 
 args = parser.parse_args()
 
-model = None
-if args.load_path:
+model = args.model
+model_name = args.model
+if args.load_path is not None:
     gpu = args.gpu if args.gpu >=0 else None
     if args.load_path.find(PruneModelManager.FOLDER_NAME) >= 0:
-        model = PruneModelManager.load(model_path=args.load_path, gpu=gpu).model
+        manager = PruneModelManager.load(model_path=args.load_path, gpu=gpu)
+        model = manager.model
+        model_name = manager.model_name
     elif args.load_path.find(QuantizedModelManager.FOLDER_NAME) >= 0:
-        model = QuantizedModelManager.load(model_path=args.load_path, gpu=gpu).model
+        manager = QuantizedModelManager.load(model_path=args.load_path, gpu=gpu)
+        model = manager.model
+        model_name = manager.model_name
     else:
-        model = VictimModelManager.load(args.load_path, gpu).model
+        manager = VictimModelManager.load(args.load_path, gpu)
+        model = manager.model
+        model_name = manager.model_name
 else:
     model = get_model(args.model, pretrained=args.pretrained)
 
@@ -48,7 +55,7 @@ model.eval()
 model.to(device)
 inputs = inputs.to(device)
 
-print(f"Running {args.n} inferences on {args.model} on {dev_name}...")
+print(f"Running {args.n} inferences on {model_name} on {dev_name}...")
 
 model(inputs)
 
