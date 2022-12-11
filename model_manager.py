@@ -122,7 +122,7 @@ class ModelManagerBase(ABC):
         return model
 
     def loadModel(self, path: Path) -> None:
-        assert path.exists(), f"Model load path \n{path}\n does not exist."
+        assert Path(path).exists(), f"Model load path \n{path}\n does not exist."
         # the epochs trained should already be done from loading the config.
         # if "_" in str(path.name):
         #     self.epochs_trained = int(str(path.name).split("_")[1].split(".")[0])
@@ -618,7 +618,7 @@ class VictimModelManager(ProfiledModelManager):
             architecture=conf["architecture"],
             dataset=conf["dataset"],
             model_name=conf["model_name"],
-            load=model_path,
+            load=Path(model_path),
             gpu=gpu,
             data_subset_percent=conf["data_subset_percent"],
             pretrained=conf["pretrained"],
@@ -973,7 +973,7 @@ class SurrogateModelManager(ModelManagerBase):
         load_path = load_folder / SurrogateModelManager.MODEL_FILENAME
         conf = ModelManagerBase.loadConfig(load_folder)
         surrogate_manager = SurrogateModelManager(
-            victim_model_path=model_path,
+            victim_model_path=Path(model_path),
             nvprof_args=conf["nvprof_args"],
             arch_pred_model_name=conf["arch_pred_model_name"],
             load_path=load_path,
@@ -1385,10 +1385,7 @@ if __name__ == "__main__":
     # trainOneVictim("alexnet")
     trainVictimModels(
         gpu=0,
-        models = ['alexnet', 'resnext50_32x4d',
-          'resnext101_32x8d', 'vgg11', 'vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19',
-          'squeezenet1_0', 'squeezenet1_1', 'mnasnet0_5', 'mnasnet0_75', 'mnasnet1_0', 'mnasnet1_3'
-          ]
+        models = ['squeezenet1_0', 'squeezenet1_1']
     )
     time.sleep(100)
     profileAllVictimModels()

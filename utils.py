@@ -19,7 +19,7 @@ def getSystem() -> str:
 def latest_file(path: Path, pattern: str = "*") -> Path:
     """Return the latest file in the folder <path>"""
     # source https://stackoverflow.com/questions/39327032/how-to-get-the-latest-file-in-a-folder
-    files = path.glob(pattern)
+    files = [x for x in path.glob(pattern)]
     if len(files) == 0:
         print(f"Warning: no files with pattern {pattern} found in folder {path}")
         return None
