@@ -988,7 +988,7 @@ class SurrogateModelManager(ModelManagerBase):
         surrogate_manager = SurrogateModelManager(
             victim_model_path=vict_model_path,
             architecture=conf["architecture"],
-            arch_pred_model_name=conf["arch_pre_model_name"],
+            arch_conf=conf,
             arch_pred_model_name=conf["arch_pred_model_name"],
             pretrained=False,
             load_path=model_path,
