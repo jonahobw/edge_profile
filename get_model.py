@@ -101,6 +101,8 @@ def get_model(model_arch:str, pretrained=False, kwargs={}):
         kwargs.update(model_params["kwargs"])
     if "num_classes" in kwargs and pretrained:
         print("Cannot reset number of classes on pretrained model, will default to 1000.")
+        # TODO implement finetuning changing the last layer see here
+        # https://pytorch.org/tutorials/beginner/finetuning_torchvision_models_tutorial.html
         kwargs.pop("num_classes")
     print(f"Passing {kwargs} args to torch to construct {model_arch}")
     return getattr(models, model_arch)(pretrained=pretrained, **kwargs)

@@ -235,13 +235,12 @@ def parse_all_profiles(folder: Union[Path, str], save_filename=None, gpu=0, verb
     # validate that no profiles are corrupt and that there is a class balance
     validate_all(folder)
 
-    root_folder = Path.cwd() / "profiles" / folder
-    if not root_folder.exists():
-        raise FileNotFoundError(f"Folder {root_folder} does not exist.")
+    if not folder.exists():
+        raise FileNotFoundError(f"Folder {folder} does not exist.")
 
     combined = pd.DataFrame()
 
-    for subdir in [x for x in root_folder.iterdir() if x.is_dir()]:
+    for subdir in [x for x in folder.iterdir() if x.is_dir()]:
         model = subdir.name
         if verbose:
             print(f"Parsing profiles for {model}")
@@ -257,7 +256,7 @@ def parse_all_profiles(folder: Union[Path, str], save_filename=None, gpu=0, verb
     if save_filename is None:
         save_filename = "aggregated.csv"
 
-    save_path = root_folder / save_filename
+    save_path = folder / save_filename
 
     combined = add_model_family(combined)
     combined.to_csv(save_path, index=False)
@@ -326,14 +325,13 @@ def validate_nvprof(folder: Path, remove: bool=False) -> Tuple[bool, Mapping[str
 
     print("Checking profile validity ... ")
 
-    root_folder = Path.cwd() / "profiles" / folder
-    if not root_folder.exists():
-        raise FileNotFoundError(f"Folder {root_folder} does not exist.")
+    if not folder.exists():
+        raise FileNotFoundError(f"Folder {folder} does not exist.")
 
     all_valid = True
     invalid_profiles = {}
 
-    for subdir in [x for x in root_folder.iterdir() if x.is_dir()]:
+    for subdir in [x for x in folder.iterdir() if x.is_dir()]:
         model = subdir.name
         invalid_profiles[model] = {"num_invalid": 0, "invalid_profiles": []}
         print(f"Parsing profiles for {model}")
@@ -368,13 +366,12 @@ def validate_class_balance(folder: Path, remove: bool=False) -> bool:
 
     print("Checking class balance ... ")
 
-    root_folder = Path.cwd() / "profiles" / folder
-    if not root_folder.exists():
-        raise FileNotFoundError(f"Folder {root_folder} does not exist.")
+    if not folder.exists():
+        raise FileNotFoundError(f"Folder {folder} does not exist.")
 
     profiles = {}
 
-    for subdir in [x for x in root_folder.iterdir() if x.is_dir()]:
+    for subdir in [x for x in folder.iterdir() if x.is_dir()]:
         model = subdir.name
         profiles[model] = {"num": 0, "profiles": []}
         print(f"Parsing profiles for {model}")
@@ -417,14 +414,13 @@ def validate_nans(folder: Path, remove: bool=False) -> Tuple[bool, Mapping[str, 
 
     print("Checking profiles for NaNs ... ")
 
-    root_folder = Path.cwd() / "profiles" / folder
-    if not root_folder.exists():
-        raise FileNotFoundError(f"Folder {root_folder} does not exist.")
+    if not folder.exists():
+        raise FileNotFoundError(f"Folder {folder} does not exist.")
 
     no_nans = True
     profiles_with_nan = {}
 
-    for subdir in [x for x in root_folder.iterdir() if x.is_dir()]:
+    for subdir in [x for x in folder.iterdir() if x.is_dir()]:
         model = subdir.name
         profiles_with_nan[model] = {"num_with_nan": 0, "profiles": []}
         print(f"Parsing profiles for {model}")
@@ -451,14 +447,13 @@ def read_csv(folder: Path=None, gpu: int=0) -> pd.DataFrame:
     """
     Reads the aggregated csv data from the folder.  If the aggregated csv does not exist, creates it.
 
-    :param folder: the folder name under ./profiles/<folder> where the profiles are stored.
+    :param folder: the folder where the profiles are stored.
     :return: a pandas dataframe
     """
     if not folder:
-        folder = "debug_profiles"
+        folder = Path.cwd() / "profiles" / "debug_profiles"
 
-    folder_path = Path.cwd() / "profiles" / folder
-    aggregated_csv_file = folder_path / "aggregated.csv"
+    aggregated_csv_file = folder / "aggregated.csv"
     if not aggregated_csv_file.exists():
         parse_all_profiles(folder, gpu=gpu)
     return pd.read_csv(aggregated_csv_file, index_col=False)

@@ -28,6 +28,7 @@ from get_model import (
     all_models,
     get_quantized_model,
     quantized_models,
+    name_to_family
 )
 from datasets import Dataset
 from logger import CSVLogger
@@ -112,9 +113,12 @@ class ModelManagerBase(ABC):
             self.config["epochs_trained"] = self.epochs_trained
 
     def constructModel(
-        self, pretrained: bool=False, quantized: bool = False, kwargs={}
+        self, pretrained: bool=False, quantized: bool = False, kwargs=None
     ) -> torch.nn.Module:
+        if kwargs is None:
+            kwargs = {}
         kwargs.update({"num_classes": self.dataset.num_classes})
+        print(f"Model Manager - passing {kwargs} args to construct {self.architecture}")
         if not quantized:
             model = get_model(self.architecture, pretrained=pretrained, kwargs=kwargs)
         else:
@@ -518,7 +522,6 @@ class ProfiledModelManager(ModelManagerBase):
                 result.append((profile_path, conf))
         return result
 
-
     def predictVictimArch(self, model_type: str) -> Tuple[str, float, NNArchPred]:
         # todo store logits vector in a dataframe including columns for profile and model type
         # todo add option to select profile by name
@@ -631,7 +634,7 @@ class VictimModelManager(ProfiledModelManager):
         """Create a ModelManager Object from a path to a model file."""
         folder_path = Path(model_path).parent
         conf = ModelManagerBase.loadConfig(folder_path)
-        print(f"Loading {conf['architecture']} trained on {conf['dataset']}")
+        print(f"Loading {conf['architecture']} trained on {conf['dataset']} from path {model_path}")
         model_manager = VictimModelManager(
             architecture=conf["architecture"],
             dataset=conf["dataset"],
@@ -909,8 +912,9 @@ class SurrogateModelManager(ModelManagerBase):
     def __init__(
         self,
         victim_model_path: Path,
-        nvprof_args: dict = {},
-        arch_pred_model_name: str = "nn",
+        architecture: str,
+        arch_conf: float,
+        arch_pred_model_name: str,
         pretrained: bool = False,
         load_path: Path = None,
         gpu: int = -1,
@@ -922,24 +926,20 @@ class SurrogateModelManager(ModelManagerBase):
 
         Note - the self.config only accounts for keeping track of one history of
         victim model architecture prediction.
+        Assumes victim model has been profiled/predicted.
         """
         self.victim_model = self.loadVictim(victim_model_path, gpu=gpu)
         if isinstance(self.victim_model, VictimModelManager):
             assert self.victim_model.config["epochs_trained"] > 0
-        self.nvprof_args = nvprof_args
         self.arch_pred_model_name = arch_pred_model_name
-        self.arch_pred_model = None
-        path = self.victim_model.path / self.FOLDER_NAME
+        time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = self.victim_model.path / f"{self.FOLDER_NAME}_{time}"
         self.pretrained = pretrained
         if load_path is None:
             # creating this object for the first time
             if not self.victim_model.isProfiled():
-                self.victim_model.runNVProf(**nvprof_args)
-            architecture, conf, arch_pred_model = self.victim_model.predictVictimArch(
-                arch_pred_model_name
-            )
-            self.arch_pred_model = arch_pred_model
-            self.arch_confidence = conf
+                print(f"Warning, victim model {self.victim_model.path} has not been profiled and a surrogate model is being created.")
+            self.arch_confidence = arch_conf
             if save_model:
                 assert not path.exists()
                 path.mkdir(parents=True)
@@ -947,7 +947,6 @@ class SurrogateModelManager(ModelManagerBase):
             # load from a previous run
             folder = load_path.parent
             config = self.loadConfig(folder)
-            architecture = config["architecture"]
             self.arch_confidence = config["arch_confidence"]
         super().__init__(
             architecture=architecture,
@@ -971,7 +970,6 @@ class SurrogateModelManager(ModelManagerBase):
         self.saveConfig(
             {
                 "victim_model_path": str(victim_model_path),
-                "nvprof_args": nvprof_args,
                 "arch_pred_model_name": arch_pred_model_name,
                 "arch_confidence": self.arch_confidence,
                 "pretrained": self.pretrained,
@@ -981,20 +979,19 @@ class SurrogateModelManager(ModelManagerBase):
     @staticmethod
     def load(model_path: str, gpu: int = -1):
         """
-        Given a path to a victim model, which could be a model from
-        VictimModelManager, PruneModelManager, or QuantizeModelManager, 
-        load into a SurrogateModelManager obj.
-        Victim models are stored in {victim_model_path}/checkpoint.pt
-        Surrogate models are stored under {victim_model_path}/surrogate/checkpoint.pt
+        model_path is a path to a surrogate models checkpoint,
+        they are stored under {victim_model_path}/surrogate_{time}/checkpoint.pt
         """
-        load_folder = Path(model_path).parent / SurrogateModelManager.FOLDER_NAME
-        load_path = load_folder / SurrogateModelManager.MODEL_FILENAME
+        vict_model_path = Path(model_path).parent.parent
+        load_folder = Path(model_path).parent
         conf = ModelManagerBase.loadConfig(load_folder)
         surrogate_manager = SurrogateModelManager(
-            victim_model_path=Path(model_path),
-            nvprof_args=conf["nvprof_args"],
+            victim_model_path=vict_model_path,
+            architecture=conf["architecture"],
+            arch_pred_model_name=conf["arch_pre_model_name"],
             arch_pred_model_name=conf["arch_pred_model_name"],
-            load_path=load_path,
+            pretrained=False,
+            load_path=model_path,
             gpu=gpu,
         )
         print(f"Loaded surrogate model\n{model_path}\n")
@@ -1278,24 +1275,29 @@ def trainVictimModels(
     f.close()
 
 
-def profileAllVictimModels(gpu: int = 0, prefix: str = None, nvprof_args: dict = {}):
+def profileAllVictimModels(gpu: int = 0, prefix: str = None, nvprof_args: dict = {}, count: int = 1, add: bool = False):
     """Victim models must be trained already."""
     for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
         vict_manager = VictimModelManager.load(model_path=vict_path, gpu=gpu)
         assert vict_manager.config["epochs_trained"] > 0
-        vict_manager.runNVProf(**nvprof_args)
+        if vict_manager.isProfiled() and not add:
+            print(f"{vict_manager.model_name} is already profiled, skipping...")
+            continue
+        for i in range(count):
+            vict_manager.runNVProf(**nvprof_args)
 
 
 def trainSurrogateModels(
-    nvprof_args: dict,
+    predict: bool = True,
+    arch_pred_model_name: str = "nn",
     model_paths: List[str] = None,
-    epochs=150,
+    epochs=50,
     gpu=0,
     reverse=False,
     debug=None,
     save_model: bool = True,
 ):
-    """Victim models must be trained already."""
+    """Victim models must be trained and profiled already."""
     if model_paths is None:
         model_paths = VictimModelManager.getModelPaths()
     if reverse:
@@ -1303,12 +1305,21 @@ def trainSurrogateModels(
     start = time.time()
 
     for i, victim_path in enumerate(model_paths):
-        vict_name = Path(victim_path).parent.name
         iter_start = time.time()
+        vict_manager = VictimModelManager.load(victim_path)
+        if predict:
+            arch, conf, model = vict_manager.predictVictimArch(model_type=arch_pred_model_name)
+        else:
+            print(f"Warning, predict is False, not predicting for model {vict_manager.path}")
+            arch = vict_manager.architecture
+            arch_pred_model_name = None
+            conf = 0.0
         try:
             surrogate_model = SurrogateModelManager(
                 victim_model_path=victim_path,
-                nvprof_args=nvprof_args,
+                architecture=arch,
+                arch_conf=conf,
+                arch_pred_model_name=arch_pred_model_name,
                 gpu=gpu,
                 save_model=save_model,
             )
@@ -1409,7 +1420,9 @@ def loadProfilesToFolder(prefix: str="models", folder_name: str = "all_profiles"
     folder = Path.cwd() / prefix / folder_name
     if folder.exists():
         if not replace:
-            raise FileExistsError
+            print(f"loadProfilesToFolder: folder already exists and replace is false, returning")
+            return
+            # raise FileExistsError
         shutil.rmtree(folder)
     folder.mkdir(exist_ok=True)
 
@@ -1421,23 +1434,67 @@ def loadProfilesToFolder(prefix: str="models", folder_name: str = "all_profiles"
         profiles = manager.getAllProfiles()
         for profile_path, config in profiles:
             config["model"] = manager.architecture
+            config["model_path"] = str(manager.path)
+            config["manager_name"] = manager.model_name
+            config["model_family"] = name_to_family[manager.architecture]
             new_name = f"profile_{manager.architecture}_{file_count}.csv"
             new_path = folder / new_name
             shutil.copy(profile_path, new_path)
             file_count += 1
-            all_config[new_name] = config
+            all_config[str(new_name)] = config
+    
+    # save config file
+    config_path = folder / config_name
+    with open(config_path, "w") as f:
+        json.dump(all_config, f, indent=4)
         
 
+def predictVictimArchs(model, folder: Path, name: str = "predictions", save: bool = True):
+    """Iterates through the profiles in <folder> which was generated 
+    by loadProfilesToFolder(), the architecture of each, and storing 
+    a report in a json file called <name>
+    """
+    assert folder.exists()
 
-# def predictVictimArchs(model, prefix: str="models", name: str = "all_profiles.csv", save: bool = True):
-#     """For every profile for every victim model, predict it's architecture."""
+    predictions = {}
 
-#     if save:
-#         # create folder
-#         folder = Path.cwd() / prefix / name.split(".")[0]
-#         folder.mkdir(exist_ok=True)
+    config_path = latest_file(folder, pattern="*.json")
+    with open(config_path, "r") as f:
+        config = json.load(f)
 
-#     vict_model_paths = VictimModelManager.getModelPaths(prefix=prefix)
+    total_tested = 0
+    total_correct = 0
+    family_correct = 0
+    for profile_name in config:
+        profile_path = folder / profile_name
+        profile_features = parse_one_profile(profile_path, gpu=config[profile_name]["gpu"])
+        arch, conf = model.predict(profile_features)
+        # print(
+        #     f"Predicted architecture for victim model {config[profile_name]['manager_name']} is {arch} with {conf * 100}% confidence."
+        # )
+        predictions[profile_name] = {"pred_arch": arch, "conf": conf, "true_arch": config[profile_name]["model"], "true_family": config[profile_name]["model_family"]}
+        total_tested += 1
+        predictions[profile_name]["correct"] = False
+        predictions[profile_name]["family_correct"] = False
+        if arch == config[profile_name]["model"]:
+            total_correct += 1
+            predictions[profile_name]["correct"] = True
+        if name_to_family[arch] == name_to_family[config[profile_name]["model"]]:
+            predictions[profile_name]["family_correct"] = True
+            family_correct += 1
+    predictions["total_tested"] = total_tested
+    predictions["total_correct"] = total_correct
+    predictions["family_correct"] = family_correct
+    predictions["accuracy"] = total_correct/total_tested
+    predictions["family_accuracy"] = family_correct/total_tested
+
+    print(json.dumps(predictions, indent=4))
+
+    if save:
+        report_path = folder / f"{name}.json"
+        with open(report_path, "w") as f:
+            json.dump(predictions, f, indent=4)
+
 
 
 if __name__ == "__main__":
@@ -1451,7 +1508,7 @@ if __name__ == "__main__":
     #     models = ['squeezenet1_0', 'squeezenet1_1']
     # )
     # time.sleep(100)
-    profileAllVictimModels()
+    #profileAllVictimModels()
     
     #trainOneVictim(model_arch="mobilenet_v2", epochs=1, debug=1, save_model=False)
     
@@ -1465,5 +1522,8 @@ if __name__ == "__main__":
     # surrogate_manager.trainModel(num_epochs=2, debug=2, replace=True)
 
     # surrogate_manager.transferAttackPGD(eps=8/255, step_size=2/255, iterations=10, debug=1)
+    # loadProfilesToFolder()
+    # predictVictimArchs()
+    trainSurrogateModels(predict=False)
     exit(0)
     

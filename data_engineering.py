@@ -14,6 +14,8 @@ from format_profiles import read_csv
 import config
 import json
 
+def softmax(x):
+    return(np.exp(x - np.max(x)) / np.exp(x - np.max(x)).sum())
 
 def remove_cols(df: pd.DataFrame, substrs: list, endswith: bool = False, verbose=False):
     """Removes columns of the dataframe which include (or end with) any of the substrings."""
@@ -29,14 +31,37 @@ def remove_cols(df: pd.DataFrame, substrs: list, endswith: bool = False, verbose
                 return True
         return False
 
-    remove_cols = [col_name for col_name in df.columns if remove_col(col_name)]
+    remove_columns = [col_name for col_name in df.columns if remove_col(col_name)]
 
     if verbose:
         print("\nRemoving columns:")
-        for i in remove_cols:
+        for i in remove_columns:
             print(i)
 
-    return df.drop(remove_cols, axis=1)
+    return df.drop(remove_columns, axis=1)
+
+
+def filter_cols(df: pd.DataFrame, substrs: list, keep: list = None, verbose: bool=False):
+    """Only keeps columns containing substrings"""
+    if keep is None:
+        keep = ["model", "model_family", "file"]
+
+    def keep_col(col_name: str):
+        for substr in substrs:
+            if substr in col_name:
+                return True
+        for x in keep:
+            if col_name == x:
+                return True
+        return False
+    
+    remove_columns = [col_name for col_name in df.columns if not keep_col(col_name)]
+    if verbose:
+        print("\nRemoving columns:")
+        for i in remove_columns:
+            print(i)
+
+    return df.drop(remove_columns, axis=1)
 
 
 def get_csv(aggregated_csv_folder, remove_nans=True):
@@ -280,7 +305,7 @@ def all_data(agg_csv_folder, system_data_only=False, no_system_data=False, indic
     Return a dataframe containing all features.  Creates indicator columns for incomplete
     features, and fills NaNs with the mean of that feature.
 
-    :param agg_csv_folder: the folder under ./profiles/ where the aggregated csv lives.
+    :param agg_csv_folder: the folder where the aggregated csv lives.
     :param system_data_only: If true, only return system data (clock, temp, power, fan).
     :param no_system_data: if true, excludes system data.
     :param indicators_only: only return indicator columns
