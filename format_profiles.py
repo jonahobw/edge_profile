@@ -8,28 +8,28 @@ from typing import Mapping, Tuple, Union
 from pathlib import Path
 import pandas as pd
 import numpy as np
-from collect_profiles import check_profile
 from get_model import name_to_family
 
 
-def add_model_family(df: pd.DataFrame) -> pd.DataFrame:
+
+def check_profile(profile_csv):
     """
-    Adds a 'model_family' column to the dataframe based on the 'model' column.
+    Loose check to see if nvprof failed, returns a boolean.
 
-    Example:
-    wide_resnet50   -> resnet
-    vgg13_bn        -> vgg
-    densenet201     -> densenet
-
-    :param df: the dataframe to add the column to.  Must have a column called 'model'
-    :return: the original dataframe with the new column.
+    Check 1: nvprof failed, will only be 2 lines in the file.
+    Check 2: nvprof warnings, will be more than 3 lines at the beginning starting with '=='
     """
 
-    def label_family(row):
-        return name_to_family[row["model"]]
-
-    df["model_family"] = df.apply(label_family, axis=1)
-    return df
+    with open(profile_csv, "r") as f:
+        equal_line_count = 0
+        for i, line in enumerate(f):
+            if line.startswith("=="):
+                equal_line_count += 1
+                if equal_line_count > 3:
+                    return False  # check 2
+            if i >= 5:
+                return True
+    return False  # check 1
 
 
 def check_for_nans(profile_csv, gpu=0) -> list[str]:
@@ -55,6 +55,29 @@ def check_for_nans(profile_csv, gpu=0) -> list[str]:
     null_cols.extend(null_system_cols)
 
     return null_cols
+
+
+def validProfile(profile_csv, gpu=0) -> bool:
+    return check_profile(profile_csv) and len(check_for_nans(profile_csv, gpu)) == 0
+
+def add_model_family(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Adds a 'model_family' column to the dataframe based on the 'model' column.
+
+    Example:
+    wide_resnet50   -> resnet
+    vgg13_bn        -> vgg
+    densenet201     -> densenet
+
+    :param df: the dataframe to add the column to.  Must have a column called 'model'
+    :return: the original dataframe with the new column.
+    """
+
+    def label_family(row):
+        return name_to_family[row["model"]]
+
+    df["model_family"] = df.apply(label_family, axis=1)
+    return df
 
 
 def parse_one_aggregate_profile(csv_file=None, example=False, nrows=None, skiprows=3):

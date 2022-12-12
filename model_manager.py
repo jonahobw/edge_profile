@@ -97,6 +97,7 @@ class ModelManagerBase(ABC):
             "path": str(self.path),
             "architecture": self.architecture,
             "dataset": dataset,
+            "dataset_config": dataset.config,
             "data_subset_percent": data_subset_percent,
             "data_idx": data_idx,
             "model_name": self.model_name,
@@ -1334,6 +1335,7 @@ def trainSurrogateModels(
     for i, victim_path in enumerate(model_paths):
         iter_start = time.time()
         vict_manager = VictimModelManager.load(victim_path)
+        vict_name = Path(victim_path).parent.name
         if predict:
             arch, conf, model = vict_manager.predictVictimArch(model_type=arch_pred_model_name)
         else:
@@ -1360,7 +1362,6 @@ def trainSurrogateModels(
                 params=surrogate_model.config,
             )
         except Exception as e:
-            vict_name = Path(victim_path).parent.name
             print(e)
             config.EMAIL.email(
                 f"Failed Training Surrogate model for victim Model {vict_name}",

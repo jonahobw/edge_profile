@@ -1,4 +1,5 @@
 import torchvision.models as models
+import torch
 
 alexnet = "alexnet", ['alexnet']
 resnet = "resnet", ['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152', 'resnext50_32x4d',
@@ -100,10 +101,13 @@ def get_model(model_arch:str, pretrained=False, kwargs={}):
     if "kwargs" in model_params:
         kwargs.update(model_params["kwargs"])
     if "num_classes" in kwargs and pretrained:
-        print("Cannot reset number of classes on pretrained model, will default to 1000.")
-        # TODO implement finetuning changing the last layer see here
-        # https://pytorch.org/tutorials/beginner/finetuning_torchvision_models_tutorial.html
+        num_classes = kwargs["num_classes"]
         kwargs.pop("num_classes")
+        model = getattr(models, model_arch)(pretrained=pretrained, **kwargs)
+        success = fixLastLayer(model, model_arch)
+        if not success:
+            print("Cannot reset number of classes on pretrained model, will default to 1000.")
+        return model
     print(f"Passing {kwargs} args to torch to construct {model_arch}")
     return getattr(models, model_arch)(pretrained=pretrained, **kwargs)
 
@@ -124,3 +128,12 @@ def get_quantized_model(model_arch: str, kwargs={}):
     
     print(f"Warning, model architecture {model_arch} is not supported for quanitzation, returning None from get_quantized_model().")
     return None
+
+
+def fixLastLayer(model: torch.nn.Module, architecture: str) -> bool:
+    # TODO implement finetuning changing the last layer see here
+    # https://pytorch.org/tutorials/beginner/finetuning_torchvision_models_tutorial.html
+    supported_models = []   #["mnasnet1_3"]
+    if architecture not in supported_models:
+        return False
+    return True

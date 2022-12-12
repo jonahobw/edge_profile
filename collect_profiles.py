@@ -21,26 +21,7 @@ import torch
 
 import config
 from utils import getSystem, latest_file, dict_to_str
-
-
-def check_profile(profile_csv):
-    """
-    Loose check to see if nvprof failed, returns a boolean.
-
-    Check 1: nvprof failed, will only be 2 lines in the file.
-    Check 2: nvprof warnings, will be more than 3 lines at the beginning starting with '=='
-    """
-
-    with open(profile_csv, "r") as f:
-        equal_line_count = 0
-        for i, line in enumerate(f):
-            if line.startswith("=="):
-                equal_line_count += 1
-                if equal_line_count > 3:
-                    return False  # check 2
-            if i >= 5:
-                return True
-    return False  # check 1
+from format_profiles import validProfile
 
 
 def run_command(folder, command):
@@ -48,7 +29,7 @@ def run_command(folder, command):
     # should be a blocking call, so the latest file is valid.
     output = subprocess.run(shlex.split(command), stdout=sys.stdout)
     profile_file = latest_file(folder)
-    return check_profile(profile_file), profile_file
+    return validProfile(profile_file), profile_file
 
 
 def run_command_popen(folder, command, model_type):
@@ -67,7 +48,7 @@ def run_command_popen(folder, command, model_type):
         raise FileNotFoundError(
             f"File {profile_file} does not exist and cannot be validated."
         )
-    return check_profile(profile_file), profile_file
+    return validProfile(profile_file), profile_file
 
 
 def generateExeName(use_exe: bool) -> str:
@@ -85,9 +66,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-n",
         type=int,
-        default=1,
+        default=10,
         required=False,
-        help="number of inferences per profile. default 1",
+        help="number of inferences per profile. default 10",
     )
     parser.add_argument(
         "-i",

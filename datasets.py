@@ -171,70 +171,44 @@ class Dataset:
         idx: int = 0,
         resize: int = None,
         normalize: Tuple[List[float], List[float]] = None,
+        lazy_load: bool = True,
     ) -> None:
         """
         data_subset_percent will divide the dataset into 2 pieces, and the first will have <data_subset_percent>% of the data.
             which portion of the data is allocated depends on <idx> which is either 0 or 1
         resize will resize the data when retrieving it.  Some models need this, most do not.  Resizing significantly slows training.
+        lazy_load: if true, won't load underlying datasets until they are referenced
         """
         self.name = dataset.lower()
         self.num_classes = self.num_classes_map[self.name]
+        self.batch_size = batch_size
+        self.workers = workers
         self.data_subset_percent = data_subset_percent
+        self.seed = seed
+        self.idx = idx
+        self.resize = resize
+        self.normalize = normalize
+        self.lazy_load = lazy_load
 
-        self.train_data = self.name_mapping[self.name](resize=resize, normalize=normalize)
-        if data_subset_percent is not None:
-            first_amount = int(len(self.train_data) * data_subset_percent)
-            second_amount = len(self.train_data) - first_amount
-            self.train_data = random_split(
-                self.train_data,
-                [first_amount, second_amount],
-                generator=Generator().manual_seed(seed),
-            )[idx]
-        self.train_dl = DataLoader(
-            self.train_data,
-            shuffle=True,
-            batch_size=batch_size,
-            pin_memory=True,
-            num_workers=workers,
-        )
+        # lazy loading attributes, each is associated
+        # with a property of this class with the same name but
+        # without a '_' at the beginning, these are only loaded
+        # when the property is referenced.
+        self._train_data = None
+        self._train_dl = None
+        self._val_data = None
+        self._val_dl = None
+        self._train_acc_data = None
+        self._train_acc_dl = None
 
-        self.val_data = self.name_mapping[self.name](train=False, resize=resize, normalize=normalize)
-        if data_subset_percent is not None:
-            first_amount = int(len(self.val_data) * data_subset_percent)
-            second_amount = len(self.val_data) - first_amount
-            self.val_data = random_split(
-                self.val_data,
-                [first_amount, second_amount],
-                generator=Generator().manual_seed(seed),
-            )[idx]
-        self.val_dl = DataLoader(
-            self.val_data,
-            shuffle=False,
-            batch_size=batch_size,
-            pin_memory=True,
-            num_workers=workers,
-        )
-
-        self.train_acc_data = self.train_data
-        if self.name == "cifar10":
-            self.train_acc_data = self.name_mapping[self.name](
-                deterministic=True, resize=resize, normalize=normalize
-            )
-            if data_subset_percent is not None:
-                first_amount = int(len(self.train_acc_data) * data_subset_percent)
-                second_amount = len(self.train_acc_data) - first_amount
-                self.train_acc_data = random_split(
-                    self.train_acc_data,
-                    [first_amount, second_amount],
-                    generator=Generator().manual_seed(seed),
-                )[idx]
-        self.train_acc_dl = DataLoader(
-            self.train_acc_data,
-            shuffle=False,
-            batch_size=batch_size,
-            pin_memory=True,
-            num_workers=workers,
-        )
+        if not lazy_load:
+            # to load the objects, just need to reference them
+            assert self.train_data is not None
+            assert self.train_dl is not None
+            assert self.val_data is not None
+            assert self.val_dl is not None
+            assert self.train_acc_data is not None
+            assert self.train_acc_dl is not None
 
         self.config = {
             "dataset": self.name,
@@ -244,12 +218,100 @@ class Dataset:
             "seed": seed,
             "idx": idx,
             "resize": resize,
-            "normalize": normalize
+            "normalize": normalize,
+            "lazy_load": lazy_load,
         }
     
+    @property
+    def train_data(self):
+        if self._train_data is None:
+            # this executes the first time the property is used
+            self._train_data = self.name_mapping[self.name](resize=self.resize, normalize=self.normalize)
+            if self.data_subset_percent is not None:
+                first_amount = int(len(self._train_data) * self.data_subset_percent)
+                second_amount = len(self._train_data) - first_amount
+                self._train_data = random_split(
+                    self._train_data,
+                    [first_amount, second_amount],
+                    generator=Generator().manual_seed(self.seed),
+                )[self.idx]
+        return self._train_data
+    
+    @property
+    def train_dl(self):
+        if self._train_dl is None:
+            # this executes the first time the property is used
+            self._train_dl = DataLoader(
+                self.train_data,
+                shuffle=True,
+                batch_size=self.batch_size,
+                pin_memory=True,
+                num_workers=self.workers,
+            )
+        return self._train_dl
+    
+    @property
+    def val_data(self):
+        if self._val_data is None:
+            # this executes the first time self.train_data is used
+            self._val_data = self.name_mapping[self.name](train=False, resize=self.resize, normalize=self.normalize)
+            if self.data_subset_percent is not None:
+                first_amount = int(len(self._val_data) * self.data_subset_percent)
+                second_amount = len(self._val_data) - first_amount
+                self._val_data = random_split(
+                    self._val_data,
+                    [first_amount, second_amount],
+                    generator=Generator().manual_seed(self.seed),
+                )[self.idx]
+        return self._val_data
+    
+    @property
+    def val_dl(self):
+        if self._val_dl is None:
+            # this executes the first time the property is used
+            self._val_dl = DataLoader(
+                self.val_data,
+                shuffle=False,
+                batch_size=self.batch_size,
+                pin_memory=True,
+                num_workers=self.workers,
+            )
+        return self._val_dl
+    
+    @property
+    def train_acc_data(self):
+        if self._train_acc_data is None:
+            # this executes the first time the property is used
+            self._train_acc_data = self.train_data
+            if self.name == "cifar10":
+                self._train_acc_data = self.name_mapping[self.name](
+                    deterministic=True, resize=self.resize, normalize=self.normalize
+                )
+                if self.data_subset_percent is not None:
+                    first_amount = int(len(self._train_acc_data) * self.data_subset_percent)
+                    second_amount = len(self._train_acc_data) - first_amount
+                    self._train_acc_data = random_split(
+                        self._train_acc_data,
+                        [first_amount, second_amount],
+                        generator=Generator().manual_seed(self.seed),
+                    )[self.idx]
+        return self._train_acc_data
+    
+    @property
+    def train_acc_dl(self):
+        if self._train_acc_dl is None:
+            # this executes the first time the property is used
+            self._train_acc_dl = DataLoader(
+                self.train_acc_data,
+                shuffle=False,
+                batch_size=self.batch_size,
+                pin_memory=True,
+                num_workers=self.workers,
+            )
+        return self._train_acc_dl
+
     def classBalance(self, dataset: Union[VisionDataset, Subset], show=True) -> Dict[int, int]:
         if isinstance(dataset, Subset):
-            indices = dataset.indices
             result = dict(Counter(dataset.dataset.targets))
         else:
             result = dict(Counter(dataset.targets))

@@ -49,15 +49,14 @@ if args.gpu >=0:
     device = torch.device(f"cuda:{args.gpu}")
     dev_name = f"gpu{args.gpu}"
 
-inputs = construct_input(args.input, args.n, seed=args.seed)
+print(f"Running {args.n} inferences on {model_name} on {dev_name}...")
 
 model.eval()
 model.to(device)
-inputs = inputs.to(device)
-
-print(f"Running {args.n} inferences on {model_name} on {dev_name}...")
-
-model(inputs)
+for i in range(args.n):
+    inputs = construct_input(type=args.input, number=1, seed=args.seed)
+    inputs = inputs.to(device)
+    model(inputs)
 
 print("Completed.")
 
