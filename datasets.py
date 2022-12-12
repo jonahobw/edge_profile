@@ -1,11 +1,14 @@
 """
 adapted from https://github.com/jonahobw/shrinkbench/blob/master/datasets/datasets.py
 """
+import json
 import pathlib
-from typing import List, Tuple
+from typing import Dict, List, Tuple, Union
+from collections import Counter
 
 from torchvision import transforms, datasets
-from torch.utils.data import DataLoader, random_split
+from torchvision.datasets import VisionDataset
+from torch.utils.data import DataLoader, random_split, Subset
 from torch import Generator
 
 _constructors = {
@@ -243,6 +246,16 @@ class Dataset:
             "resize": resize,
             "normalize": normalize
         }
+    
+    def classBalance(self, dataset: Union[VisionDataset, Subset], show=True) -> Dict[int, int]:
+        if isinstance(dataset, Subset):
+            indices = dataset.indices
+            result = dict(Counter(dataset.dataset.targets))
+        else:
+            result = dict(Counter(dataset.targets))
+        if show:
+            print(json.dumps(result, indent=4))
+        return result
 
 
 def datasetPartition(
