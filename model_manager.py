@@ -413,6 +413,29 @@ class ModelManagerBase(ABC):
             self.model, x, eps=eps, eps_iter=step_size, nb_iter=iterations, norm=norm
         )
 
+    def topKAcc(self, dataloader: torch.utils.data.DataLoader, topk=(1, 5)):
+        self.model.eval()
+        online_stats = {}
+        for k in topk:
+            online_stats[k] = OnlineStats()
+        
+        data_iter = tqdm(dataloader)
+        for x, y in data_iter:
+            x = x[:1]
+            y = y[:1]
+            x, y = x.to(self.device), y.to(self.device)
+            yhat = self.model(x)
+            topk_correct = correct(yhat, y, topk)
+            for k, k_correct in zip(topk, topk_correct):
+                online_stats[k].add(k_correct)
+            
+            for k in topk:
+                data_iter.set_postfix(**{str(k): online_stats[k].mean for k in online_stats})
+        
+
+        print({k: online_stats[k].mean for k in online_stats})
+
+        
 
 class ProfiledModelManager(ModelManagerBase):
     """Extends ModelManagerBase to include support for profiling"""
@@ -948,6 +971,9 @@ class SurrogateModelManager(ModelManagerBase):
             folder = load_path.parent
             config = self.loadConfig(folder)
             self.arch_confidence = config["arch_confidence"]
+            # TODO the following line is a hack, should be addressed.  The name of 
+            # the surrogate model including the timestamp is not included in the config
+            path = self.victim_model.path / Path(config["path"]).name
         super().__init__(
             architecture=architecture,
             model_name=f"surrogate_{self.victim_model.model_name}_{architecture}",
@@ -982,7 +1008,7 @@ class SurrogateModelManager(ModelManagerBase):
         model_path is a path to a surrogate models checkpoint,
         they are stored under {victim_model_path}/surrogate_{time}/checkpoint.pt
         """
-        vict_model_path = Path(model_path).parent.parent
+        vict_model_path = Path(model_path).parent.parent / VictimModelManager.MODEL_FILENAME
         load_folder = Path(model_path).parent
         conf = ModelManagerBase.loadConfig(load_folder)
         surrogate_manager = SurrogateModelManager(
@@ -1296,6 +1322,7 @@ def trainSurrogateModels(
     reverse=False,
     debug=None,
     save_model: bool = True,
+    patience: int = 5,
 ):
     """Victim models must be trained and profiled already."""
     if model_paths is None:
@@ -1323,7 +1350,7 @@ def trainSurrogateModels(
                 gpu=gpu,
                 save_model=save_model,
             )
-            surrogate_model.trainModel(num_epochs=epochs, debug=debug)
+            surrogate_model.trainModel(num_epochs=epochs, patience=patience, debug=debug)
             config.EMAIL.email_update(
                 start=start,
                 iter_start=iter_start,
@@ -1498,6 +1525,9 @@ def predictVictimArchs(model, folder: Path, name: str = "predictions", save: boo
 
 
 if __name__ == "__main__":
+    ans = input("You are running the model manager file.  Enter yes to continue, anything else to exit.")
+    if not ans.lower() == "yes":
+        exit(0)
     # trainAllVictimModels(1, debug=2, reverse=True)
     # profileAllVictimModels()
     # trainSurrogateModels(reverse=False, gpu=-1)
