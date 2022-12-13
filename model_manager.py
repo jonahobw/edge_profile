@@ -522,56 +522,85 @@ class ProfiledModelManager(ModelManagerBase):
         profile_path = self.path / "profiles" / Path(conf["file"]).name
         return profile_path.exists()
 
-    def getProfile(self) -> Tuple[Path, Dict]:
+    def getProfile(self, filters: dict = None) -> Tuple[Path, Dict]:
         """
         Return a tuple of (path to profile_{pid}.csv,
         dictionary obtained from reading params_{pid}.json).
-        Note - currently uses the first profile it finds,
-        filters could be implemented.
+        filters: a dict and each argument in the dict must match
+            the argument from the config file associated with a profile.
+            to get a profile by name, can specify {"profile_number": "2181935"}
         """
-        # todo add option to get profile and config by name
+        if filters is None:
+            filters = {}
         profile_folder = self.path / "profiles"
+        # get config files
         profile_config = [x for x in profile_folder.glob("params_*")]
         assert len(profile_config) > 0
-        with open(profile_config[0], "r") as f:
-            conf = json.load(f)
-        prof_num = conf["profile_number"]
-        profile_path = profile_folder / f"profile_{prof_num}.csv"
-        assert profile_path.exists()
-        return profile_path, conf
 
-    def getAllProfiles(self) -> List[Tuple[Path, Dict]]:
-        """Returns a list of tuples (path to profile_{pid}.csv,
+        for config_path in profile_config:
+            with open(config_path, "r") as f:
+                conf = json.load(f)
+            matched_filter = True
+            for arg in filters:
+                if filters[arg] != conf[arg]:
+                    matched_filter = False
+                    break
+            if matched_filter:
+                prof_num = conf["profile_number"]
+                profile_path = profile_folder / f"profile_{prof_num}.csv"
+                assert profile_path.exists()
+                return profile_path, conf
+
+        raise ValueError(f"No profiles with filters {filters} found in {profile_folder}")
+
+    def getAllProfiles(self, filters: dict = None) -> List[Tuple[Path, Dict]]:
+        """
+        Returns a list of tuples (path to profile_{pid}.csv,
         dictionary obtained from reading params_{pid}.json) for
-        every profile in self.path/profiles"""
+        every profile in self.path/profiles
+        filters: a dict and each argument in the dict must match
+            the argument from the config file associated with a profile.
+            to get a profile by name, can specify {"profile_number": "2181935"}
+        """
+        if filters is None:
+            filters = {}
         result = []
         profile_folder = self.path / "profiles"
         profile_configs = [x for x in profile_folder.glob("params_*")]
         for config_file in profile_configs:
             with open(config_file, "r") as f:
                 conf = json.load(f)
-            prof_num = conf["profile_number"]
-            profile_path = profile_folder / f"profile_{prof_num}.csv"
-            if profile_path.exists():
-                result.append((profile_path, conf))
+            matched_filters = True
+            for arg in filters:
+                if filters[arg] != conf[arg]:
+                    matched_filters = False
+                    break
+            if matched_filters:
+                prof_num = conf["profile_number"]
+                profile_path = profile_folder / f"profile_{prof_num}.csv"
+                if profile_path.exists():
+                    result.append((profile_path, conf))
         return result
 
     def predictVictimArch(
-        self, arch_pred_model: ArchPredBase, average: bool = False
+        self, arch_pred_model: ArchPredBase, average: bool = False, filters: dict = None
     ) -> Tuple[str, float]:
         """
         Given an architecture prediction model, use it to predict the architecture of the model associated
         with this model manager.
         average: if true, will average the features from all of the profiles on this model and then pass the
-        features to the architecture prediction model.
+            features to the architecture prediction model.
+        filters: a dict and each argument in the dict must match
+            the argument from the config file associated with a profile.
+            to get a profile by name, can specify {"profile_number": "2181935"}
         """
         # TODO add option to select profile by name
         assert self.isProfiled()
 
-        profile_csv, config = self.getProfile()
+        profile_csv, config = self.getProfile(filters=filters)
         profile_features = parse_one_profile(profile_csv, gpu=config["gpu"])
         if average:
-            all_profiles = self.getAllProfiles()
+            all_profiles = self.getAllProfiles(filters=filters)
             gpu = all_profiles[0][1]["gpu"]
             for _, config in all_profiles:
                 assert config["gpu"] == gpu
@@ -1380,6 +1409,7 @@ def trainSurrogateModels(
     patience: int = 5,
     df=None,
     average_profiles: bool = False,
+    filters: dict = None,
 ):
     """Victim models must be trained and profiled already."""
     if model_paths is None:
@@ -1396,6 +1426,7 @@ def trainSurrogateModels(
             arch, conf, model = vict_manager.predictVictimArch(
                 model=get_arch_pred_model(model_type=arch_pred_model_type, df=df),
                 average=average_profiles,
+                filters=filters,
             )
         else:
             print(
@@ -1498,7 +1529,7 @@ def pruneVictimModels(
 
 
 def loadProfilesToFolder(
-    prefix: str = "models", folder_name: str = "all_profiles", replace: bool = False
+    prefix: str = "models", folder_name: str = "all_profiles", replace: bool = False, filters: dict=None
 ):
     """
     For every victim model, loads all the profiles into cwd/prefix/name/
@@ -1506,6 +1537,9 @@ def loadProfilesToFolder(
     Additionally creates a config json file where the keys are the paths to the profiles
     and the values are dicts of information about the profile such as path to actual profile,
     actual model architecture and architecture family, and model name.
+    filters: a dict and each argument in the dict must match
+        the argument from the config file associated with a profile.
+        to get a profile by name, can specify {"profile_number": "2181935"}
     """
     config_name = "config.json"
     all_config = {}
@@ -1526,7 +1560,7 @@ def loadProfilesToFolder(
     vict_model_paths = VictimModelManager.getModelPaths(prefix=prefix)
     for vict_path in vict_model_paths:
         manager = VictimModelManager.load(vict_path)
-        profiles = manager.getAllProfiles()
+        profiles = manager.getAllProfiles(filters=filters)
         for profile_path, config in profiles:
             config["model"] = manager.architecture
             config["model_path"] = str(manager.path)

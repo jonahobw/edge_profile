@@ -20,16 +20,9 @@ from data_engineering import (
     remove_cols,
 )
 from format_profiles import parse_one_profile
-from architecture_prediction import get_arch_pred_model
+from architecture_prediction import get_arch_pred_model, ArchPredBase
 from model_manager import predictVictimArchs
 from config import SYSTEM_SIGNALS
-
-
-def gen_arch_pred_model(debug=False):
-    print(f"Training architecture prediction model")
-    if debug:
-        return NNArchPredDebug()
-    return NNArchPred()
 
 
 def parse_prof(profile_csv=None, config_file=None):
@@ -44,14 +37,6 @@ def parse_prof(profile_csv=None, config_file=None):
     with open(config_file, "r") as f:
         conf = json.load(f)
     return parse_one_profile(profile_csv, gpu=conf["gpu"])
-
-
-def predict_from_prof(profile_features, arch_pred_model, preprocess=True):
-    new = profile_features.copy()
-    arch, conf = arch_pred_model.predict(new, preprocess=preprocess)
-
-    print(f"Predicted architecture {arch} with confidence {conf}.")
-    return arch, conf
 
 
 def series_to_df(ser):
@@ -426,32 +411,14 @@ def check_specific_cols_model_mean(
     )
 
 
-def try_arch_model_without_signals(signals):
-    data = all_data("zero_noexe_lots_models")
-    for col in data.columns:
-        for sig in signals:
-            if col.find(sig) >= 0:
-                data.drop(columns=[col], inplace=True)
-                break
-    arch_model = NNArchPred(data, verbose=False)
-    profile_features = parse_prof()
-    print(f"\nWithout {signals}:")
-    predict_from_prof(profile_features, arch_model)
 
-
-def try_all_arch_without_signals():
-    for sig in SYSTEM_SIGNALS:
-        try_arch_model_without_signals([sig])
-
-
-def predict_all_victim_profiles(exclude_cols=[]):
+def predict_all_victim_profiles(arch_model: ArchPredBase, exclude_cols=[]):
     data = all_data("zero_noexe_lots_models")
     for col in data.columns:
         for excl in exclude_cols:
             if col.find(excl) >= 0:
                 data.drop(columns=[col], inplace=True)
                 break
-    arch_model = NNArchPred(data)
 
     correct = 0
     tested = 0
@@ -486,8 +453,7 @@ def predict_all_victim_profiles(exclude_cols=[]):
     return arch_model
 
 
-def feature_correlation():
-    arch_pred_model = gen_arch_pred_model()
+def feature_correlation(arch_pred_model: ArchPredBase):
     df = arch_pred_model.data.drop(columns=["model_family", "file"])
     transform_y_fn = arch_pred_model.label_encoder.fit_transform
     y = df["model"].to_numpy()
@@ -620,7 +586,7 @@ if __name__ == "__main__":
     folder = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe"
     df = getDF(path=folder)
 
-    model = get_arch_pred_model("nn", df=df)
+    model = get_arch_pred_model("lr", df=df, kwargs={"multi_class": 'multinomial', "penalty": "none"})
     # model = LRArchPredRFE(df, rfe_num=800, verbose=True)
     # model.printFeatureRank(save_path=Path.cwd(), suppress_output=True)
     # model.printFeatures()
