@@ -37,11 +37,12 @@ def get_arch_pred_model(model_type, df=None, label=None, kwargs: dict = {}):
 
 
 class ArchPredBase(ABC):
-    def __init__(self, df, label=None, verbose=True) -> None:
+    def __init__(self, df, name: str, label=None, verbose=True) -> None:
         if label is None:
             label = "model"
         self.verbose = verbose
         self.data = df
+        self.name = name
         self.label = label
         self.label_encoder = LabelEncoder()
         all_x, all_y = get_data_and_labels(self.data, shuffle=False, label=label)
@@ -109,9 +110,9 @@ class ArchPredBase(ABC):
 
 class NNArchPred(ArchPredBase):
     def __init__(
-        self, df, label=None, verbose=True, hidden_layer_factor=None, num_layers=None
+        self, df, label=None, verbose=True, hidden_layer_factor=None, num_layers=None, name="nn"
     ):
-        super().__init__(df=df, label=label, verbose=verbose)
+        super().__init__(df=df, name=name, label=label, verbose=verbose)
         print(
             f"Instantiating neural net with {self.num_classes} classes and input size of {self.input_size}"
         )
@@ -159,8 +160,8 @@ class NNArchPred(ArchPredBase):
 
 
 class LRArchPred(ArchPredBase):
-    def __init__(self, df, label=None, verbose=True):
-        super().__init__(df=df, label=label, verbose=verbose)
+    def __init__(self, df, label=None, verbose=True, name = "lr"):
+        super().__init__(df=df, name=name, label=label, verbose=verbose)
         # self.pipe = make_pipeline(StandardScaler(), LogisticRegression())
         self.model = make_pipeline(StandardScaler(), Normalizer(), LogisticRegression())
         self.model.fit(self.x_tr, self.y_train)
@@ -181,8 +182,8 @@ class LRArchPred(ArchPredBase):
 
 
 class LRArchPredRFE:
-    def __init__(self, df, label=None, verbose=True, rfe_num: int = 200) -> None:
-        super().__init__(df=df, label=label, verbose=verbose)
+    def __init__(self, df, label=None, verbose=True, rfe_num: int = 200, name="lr_rfe") -> None:
+        super().__init__(df=df, name=name, label=label, verbose=verbose)
         self.estimator = LogisticRegression()
         self.rfe_num = rfe_num
         self.rfe = RFE(

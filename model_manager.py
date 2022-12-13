@@ -36,7 +36,7 @@ from online import OnlineStats
 from model_metrics import correct, accuracy, both_correct
 from collect_profiles import run_command, generateExeName
 from utils import latest_file
-from format_profiles import parse_one_profile
+from format_profiles import parse_one_profile, avgProfiles
 from architecture_prediction import ArchPredBase, get_arch_pred_model
 import config
 
@@ -97,7 +97,7 @@ class ModelManagerBase(ABC):
             "path": str(self.path),
             "architecture": self.architecture,
             "dataset": dataset,
-            "dataset_config": dataset.config,
+            "dataset_config": self.dataset.config,
             "data_subset_percent": data_subset_percent,
             "data_idx": data_idx,
             "model_name": self.model_name,
@@ -516,7 +516,10 @@ class ProfiledModelManager(ModelManagerBase):
             return False
         with open(profile_config[0], "r") as f:
             conf = json.load(f)
-        profile_path = Path(conf["file"])
+        # instead of taking the path directly from the config file, use the name
+        # this allows the model to be profiled on one machine and then downloaded
+        # to another machine, and this method will still return true.
+        profile_path = self.path / "profiles" / Path(conf["file"]).name
         return profile_path.exists()
 
     def getProfile(self) -> Tuple[Path, Dict]:
@@ -553,14 +556,29 @@ class ProfiledModelManager(ModelManagerBase):
                 result.append((profile_path, conf))
         return result
 
-    def predictVictimArch(self, model_type: str) -> Tuple[str, float, ArchPredBase]:
-        # todo store logits vector in a dataframe including columns for profile and model type
-        # todo add option to select profile by name
+    def predictVictimArch(
+        self, arch_pred_model: ArchPredBase, average: bool = False
+    ) -> Tuple[str, float]:
+        """
+        Given an architecture prediction model, use it to predict the architecture of the model associated
+        with this model manager.
+        average: if true, will average the features from all of the profiles on this model and then pass the
+        features to the architecture prediction model.
+        """
+        # TODO add option to select profile by name
         assert self.isProfiled()
+
         profile_csv, config = self.getProfile()
         profile_features = parse_one_profile(profile_csv, gpu=config["gpu"])
-        print(f"Training architecture prediction model {model_type}")
-        arch_pred_model = get_arch_pred_model(model_type=model_type)
+        if average:
+            all_profiles = self.getAllProfiles()
+            gpu = all_profiles[0][1]["gpu"]
+            for _, config in all_profiles:
+                assert config["gpu"] == gpu
+            profile_features = avgProfiles(
+                profile_paths=[x[0] for x in all_profiles], gpu=gpu
+            )
+
         arch, conf = arch_pred_model.predict(profile_features)
         print(
             f"Predicted surrogate model architecture for victim model\n{self.path}\n is {arch} with {conf * 100}% confidence."
@@ -582,15 +600,19 @@ class ProfiledModelManager(ModelManagerBase):
         arch_conf = {"pred_arch": arch, "conf": conf}
         results = {prof_name: [arch_conf]}
         if "pred_arch" not in self.config:
-            self.config["pred_arch"] = {model_type: results}
+            self.config["pred_arch"] = {arch_pred_model.name: results}
         else:
-            if model_type not in self.config["pred_arch"]:
-                self.config["pred_arch"][model_type] = results
+            if arch_pred_model.name not in self.config["pred_arch"]:
+                self.config["pred_arch"][arch_pred_model.name] = results
             else:
-                if prof_name not in self.config["pred_arch"][model_type]:
-                    self.config["pred_arch"][model_type][prof_name] = [arch_conf]
+                if prof_name not in self.config["pred_arch"][arch_pred_model.name]:
+                    self.config["pred_arch"][arch_pred_model.name][prof_name] = [
+                        arch_conf
+                    ]
                 else:
-                    self.config["pred_arch"][model_type][prof_name].append(arch_conf)
+                    self.config["pred_arch"][arch_pred_model.name][prof_name].append(
+                        arch_conf
+                    )
         self.saveConfig()
         return arch, conf, arch_pred_model
 
@@ -1348,7 +1370,7 @@ def profileAllVictimModels(
 
 def trainSurrogateModels(
     predict: bool = True,
-    arch_pred_model_name: str = "nn",
+    arch_pred_model_type: str = "nn",
     model_paths: List[str] = None,
     epochs=50,
     gpu=0,
@@ -1356,6 +1378,8 @@ def trainSurrogateModels(
     debug=None,
     save_model: bool = True,
     patience: int = 5,
+    df=None,
+    average_profiles: bool = False,
 ):
     """Victim models must be trained and profiled already."""
     if model_paths is None:
@@ -1370,7 +1394,8 @@ def trainSurrogateModels(
         vict_name = Path(victim_path).parent.name
         if predict:
             arch, conf, model = vict_manager.predictVictimArch(
-                model_type=arch_pred_model_name
+                model=get_arch_pred_model(model_type=arch_pred_model_type, df=df),
+                average=average_profiles,
             )
         else:
             print(
