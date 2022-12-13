@@ -35,7 +35,7 @@ from logger import CSVLogger
 from online import OnlineStats
 from model_metrics import correct, accuracy, both_correct
 from collect_profiles import run_command, generateExeName
-from utils import latest_file
+from utils import latest_file, latestFileFromList
 from format_profiles import parse_one_profile, avgProfiles
 from architecture_prediction import ArchPredBase, get_arch_pred_model
 import config
@@ -529,6 +529,7 @@ class ProfiledModelManager(ModelManagerBase):
         filters: a dict and each argument in the dict must match
             the argument from the config file associated with a profile.
             to get a profile by name, can specify {"profile_number": "2181935"}
+        If there are multiple profiles which fit the filters, return the latest one.
         """
         if filters is None:
             filters = {}
@@ -536,6 +537,8 @@ class ProfiledModelManager(ModelManagerBase):
         # get config files
         profile_config = [x for x in profile_folder.glob("params_*")]
         assert len(profile_config) > 0
+
+        fit_filters = {}
 
         for config_path in profile_config:
             with open(config_path, "r") as f:
@@ -549,9 +552,13 @@ class ProfiledModelManager(ModelManagerBase):
                 prof_num = conf["profile_number"]
                 profile_path = profile_folder / f"profile_{prof_num}.csv"
                 assert profile_path.exists()
-                return profile_path, conf
-
-        raise ValueError(f"No profiles with filters {filters} found in {profile_folder}")
+                fit_filters[profile_path] = conf
+        
+        if len(fit_filters) == 0:
+            raise ValueError(f"No profiles with filters {filters} found in {profile_folder}")
+        latest_valid_path = latestFileFromList(list(fit_filters.keys()))
+        conf = fit_filters[latest_valid_path]
+        return latest_valid_path, conf
 
     def getAllProfiles(self, filters: dict = None) -> List[Tuple[Path, Dict]]:
         """
@@ -1529,7 +1536,7 @@ def pruneVictimModels(
 
 
 def loadProfilesToFolder(
-    prefix: str = "models", folder_name: str = "all_profiles", replace: bool = False, filters: dict=None
+    prefix: str = "victim_profiles", folder_name: str = "all_profiles", replace: bool = False, filters: dict=None, all: bool = True
 ):
     """
     For every victim model, loads all the profiles into cwd/prefix/name/
@@ -1540,6 +1547,7 @@ def loadProfilesToFolder(
     filters: a dict and each argument in the dict must match
         the argument from the config file associated with a profile.
         to get a profile by name, can specify {"profile_number": "2181935"}
+    all: if true, loads all the profiles, else loads one per victim model
     """
     config_name = "config.json"
     all_config = {}
@@ -1553,7 +1561,7 @@ def loadProfilesToFolder(
             return
             # raise FileExistsError
         shutil.rmtree(folder)
-    folder.mkdir(exist_ok=True)
+    folder.mkdir(exist_ok=True, parents=True)
 
     file_count = 0
 
@@ -1561,6 +1569,8 @@ def loadProfilesToFolder(
     for vict_path in vict_model_paths:
         manager = VictimModelManager.load(vict_path)
         profiles = manager.getAllProfiles(filters=filters)
+        if not all:
+            profiles = [manager.getProfile(filters=filters)]
         for profile_path, config in profiles:
             config["model"] = manager.architecture
             config["model_path"] = str(manager.path)
@@ -1667,7 +1677,7 @@ if __name__ == "__main__":
     #     models = ['squeezenet1_0', 'squeezenet1_1']
     # )
     # time.sleep(100)
-    # profileAllVictimModels()
+    # profileAllVictimModels(add=True)
 
     # trainOneVictim(model_arch="mobilenet_v2", epochs=1, debug=1, save_model=False)
 
@@ -1681,7 +1691,7 @@ if __name__ == "__main__":
     # surrogate_manager.trainModel(num_epochs=2, debug=2, replace=True)
 
     # surrogate_manager.transferAttackPGD(eps=8/255, step_size=2/255, iterations=10, debug=1)
-    # loadProfilesToFolder()
+    loadProfilesToFolder(all=False)
     # predictVictimArchs()
-    trainSurrogateModels(predict=False)
+    # trainSurrogateModels(predict=False)
     exit(0)
