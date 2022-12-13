@@ -28,7 +28,7 @@ from get_model import (
     all_models,
     get_quantized_model,
     quantized_models,
-    name_to_family
+    name_to_family,
 )
 from datasets import Dataset
 from logger import CSVLogger
@@ -37,7 +37,7 @@ from model_metrics import correct, accuracy, both_correct
 from collect_profiles import run_command, generateExeName
 from utils import latest_file
 from format_profiles import parse_one_profile
-from architecture_prediction import NNArchPred, get_arch_pred_model
+from architecture_prediction import ArchPredBase, get_arch_pred_model
 import config
 
 
@@ -87,7 +87,7 @@ class ModelManagerBase(ABC):
         self.dataset = self.loadDataset(dataset)
         self.save_model = save_model
         self.model = None  # set by self.model=self.constructModel()
-        self.model_path = None # set by self.model=self.constructModel()
+        self.model_path = None  # set by self.model=self.constructModel()
         self.device = torch.device("cpu")
         if gpu >= 0 and torch.cuda.is_available():
             self.device = torch.device(f"cuda:{gpu}")
@@ -104,8 +104,7 @@ class ModelManagerBase(ABC):
             "device": str(self.device),
         }
 
-        
-        self.epochs_trained = 0 # if loading a model, this gets updated in inheriting classes' constructors
+        self.epochs_trained = 0  # if loading a model, this gets updated in inheriting classes' constructors
         # when victim models are loaded, they call self.loadModel, which calls
         # self.saveConfig().  If config["epochs_trained"] = 0 when this happens,
         # then the actual epochs_trained is overwritten.  To prevent this, we
@@ -114,7 +113,7 @@ class ModelManagerBase(ABC):
             self.config["epochs_trained"] = self.epochs_trained
 
     def constructModel(
-        self, pretrained: bool=False, quantized: bool = False, kwargs=None
+        self, pretrained: bool = False, quantized: bool = False, kwargs=None
     ) -> torch.nn.Module:
         if kwargs is None:
             kwargs = {}
@@ -139,7 +138,9 @@ class ModelManagerBase(ABC):
         self.model_path = path
         self.saveConfig({"model_path": str(path)})
 
-    def saveModel(self, name: str = None, epoch: int = None, replace: bool = False) -> None:
+    def saveModel(
+        self, name: str = None, epoch: int = None, replace: bool = False
+    ) -> None:
         """
         If epoch is passed, will append '_<epoch>' before the file extension
         in <name>.  Example: if name="checkpoint.pt" and epoch = 10, then
@@ -223,7 +224,7 @@ class ModelManagerBase(ABC):
         lr: float = None,
         debug: int = None,
         patience: int = 10,
-        replace: bool = False
+        replace: bool = False,
     ):
         """Trains the model using dataset self.dataset.
 
@@ -299,14 +300,20 @@ class ModelManagerBase(ABC):
                 self.epochs_trained += 1
                 if self.save_model:
                     # we only write to the log file once the model is saved, see below after self.saveModel()
-                    logger.futureWrite({"timestamp": time.time() - since, "epoch": self.epochs_trained, **metrics})  
+                    logger.futureWrite(
+                        {
+                            "timestamp": time.time() - since,
+                            "epoch": self.epochs_trained,
+                            **metrics,
+                        }
+                    )
 
         except KeyboardInterrupt:
             print(f"\nInterrupted at epoch {epoch}. Tearing Down")
 
         self.model.eval()
         print("Training ended, saving model.")
-        self.saveModel(replace=replace) # this function already checks self.save_model
+        self.saveModel(replace=replace)  # this function already checks self.save_model
         if self.save_model:
             logger.flush()  # this saves all the futureWrite() calls
             logger.close()
@@ -419,7 +426,7 @@ class ModelManagerBase(ABC):
         online_stats = {}
         for k in topk:
             online_stats[k] = OnlineStats()
-        
+
         data_iter = tqdm(dataloader)
         for x, y in data_iter:
             x = x[:1]
@@ -429,14 +436,14 @@ class ModelManagerBase(ABC):
             topk_correct = correct(yhat, y, topk)
             for k, k_correct in zip(topk, topk_correct):
                 online_stats[k].add(k_correct)
-            
+
             for k in topk:
-                data_iter.set_postfix(**{str(k): online_stats[k].mean for k in online_stats})
-        
+                data_iter.set_postfix(
+                    **{str(k): online_stats[k].mean for k in online_stats}
+                )
 
         print({k: online_stats[k].mean for k in online_stats})
 
-        
 
 class ProfiledModelManager(ModelManagerBase):
     """Extends ModelManagerBase to include support for profiling"""
@@ -529,7 +536,7 @@ class ProfiledModelManager(ModelManagerBase):
         profile_path = profile_folder / f"profile_{prof_num}.csv"
         assert profile_path.exists()
         return profile_path, conf
-    
+
     def getAllProfiles(self) -> List[Tuple[Path, Dict]]:
         """Returns a list of tuples (path to profile_{pid}.csv,
         dictionary obtained from reading params_{pid}.json) for
@@ -546,7 +553,7 @@ class ProfiledModelManager(ModelManagerBase):
                 result.append((profile_path, conf))
         return result
 
-    def predictVictimArch(self, model_type: str) -> Tuple[str, float, NNArchPred]:
+    def predictVictimArch(self, model_type: str) -> Tuple[str, float, ArchPredBase]:
         # todo store logits vector in a dataframe including columns for profile and model type
         # todo add option to select profile by name
         assert self.isProfiled()
@@ -658,7 +665,9 @@ class VictimModelManager(ProfiledModelManager):
         """Create a ModelManager Object from a path to a model file."""
         folder_path = Path(model_path).parent
         conf = ModelManagerBase.loadConfig(folder_path)
-        print(f"Loading {conf['architecture']} trained on {conf['dataset']} from path {model_path}")
+        print(
+            f"Loading {conf['architecture']} trained on {conf['dataset']} from path {model_path}"
+        )
         model_manager = VictimModelManager(
             architecture=conf["architecture"],
             dataset=conf["dataset"],
@@ -678,9 +687,7 @@ class VictimModelManager(ProfiledModelManager):
         if load:
             return Path(load).parent
         time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        model_folder = (
-            Path.cwd() / "models" / architecture / f"{model_name}_{time}"
-        )
+        model_folder = Path.cwd() / "models" / architecture / f"{model_name}_{time}"
         return model_folder
 
     @staticmethod
@@ -700,7 +707,12 @@ class VictimModelManager(ProfiledModelManager):
         model_paths = []
         for arch in arch_folders:
             for model_folder in [i for i in arch.glob("*")]:
-                victim_path = models_folder / arch / model_folder / VictimModelManager.MODEL_FILENAME
+                victim_path = (
+                    models_folder
+                    / arch
+                    / model_folder
+                    / VictimModelManager.MODEL_FILENAME
+                )
                 if victim_path.exists():
                     model_paths.append(victim_path)
                 else:
@@ -812,7 +824,7 @@ class PruneModelManager(ProfiledModelManager):
         gpu: int = -1,
         load_path: Path = None,
         save_model: bool = True,
-        debug: int = None
+        debug: int = None,
     ) -> None:
         self.victim_manager = VictimModelManager.load(victim_model_path, gpu=gpu)
         assert self.victim_manager.config["epochs_trained"] > 0
@@ -837,9 +849,9 @@ class PruneModelManager(ProfiledModelManager):
                 # this must be called before self.prune() because
                 # self.prune() calls updateConfigSparsity() which
                 # assumes the path exists.
-                path.mkdir()    
+                path.mkdir()
             # construct this object for the first time
-            self.prune()    # modifies self.model
+            self.prune()  # modifies self.model
             # finetune
             self.trainModel(finetune_epochs, debug=debug)
         else:
@@ -889,24 +901,31 @@ class PruneModelManager(ProfiledModelManager):
         for name, module in self.model.named_modules():
             if module in pruned_mods_reformatted:
                 total_params = sum(p.numel() for p in module.parameters())
-                zero_params = np.sum([getattr(module, x).detach().cpu().numpy() == 0.0 for x in pruned_mods_reformatted[module]])
+                zero_params = np.sum(
+                    [
+                        getattr(module, x).detach().cpu().numpy() == 0.0
+                        for x in pruned_mods_reformatted[module]
+                    ]
+                )
                 zero_params_count += zero_params
                 sparsity["module_sparsity"][name] = (
-                    100.0
-                    * float(zero_params)
-                    / float(total_params)
+                    100.0 * float(zero_params) / float(total_params)
                 )
             else:
                 sparsity["module_sparsity"][name] = 0.0
 
         # get total sparsity
-        # getting total number of parameters from 
+        # getting total number of parameters from
         # https://stackoverflow.com/questions/49201236/check-the-total-number-of-parameters-in-a-pytorch-model/62764464#62764464
-        total_params = sum(dict((p.data_ptr(), p.numel()) for p in self.model.parameters()).values())
+        total_params = sum(
+            dict((p.data_ptr(), p.numel()) for p in self.model.parameters()).values()
+        )
         sparsity["total_parameters"] = int(total_params)
         sparsity["zero_parameters"] = int(zero_params_count)
         # the percentage of zero params
-        sparsity["total_sparsity"] = 100 * float(zero_params_count) / float(total_params)
+        sparsity["total_sparsity"] = (
+            100 * float(zero_params_count) / float(total_params)
+        )
         self.config["sparsity"] = sparsity
         self.saveConfig()
 
@@ -914,7 +933,7 @@ class PruneModelManager(ProfiledModelManager):
     def load(model_path: Path, gpu: int = -1):
         """model_path is a path to the pruned model checkpoint"""
 
-        load_folder = Path(model_path).parent   # the prune folder
+        load_folder = Path(model_path).parent  # the prune folder
         victim_path = load_folder.parent / VictimModelManager.MODEL_FILENAME
         conf = ModelManagerBase.loadConfig(load_folder)
         return PruneModelManager(
@@ -931,6 +950,7 @@ class SurrogateModelManager(ModelManagerBase):
     Constructs the surrogate model with a paired victim model, trains using from the labels from victim
     model.
     """
+
     FOLDER_NAME = "surrogate"
 
     def __init__(
@@ -962,7 +982,9 @@ class SurrogateModelManager(ModelManagerBase):
         if load_path is None:
             # creating this object for the first time
             if not self.victim_model.isProfiled():
-                print(f"Warning, victim model {self.victim_model.path} has not been profiled and a surrogate model is being created.")
+                print(
+                    f"Warning, victim model {self.victim_model.path} has not been profiled and a surrogate model is being created."
+                )
             self.arch_confidence = arch_conf
             if save_model:
                 assert not path.exists()
@@ -972,7 +994,7 @@ class SurrogateModelManager(ModelManagerBase):
             folder = load_path.parent
             config = self.loadConfig(folder)
             self.arch_confidence = config["arch_confidence"]
-            # TODO the following line is a hack, should be addressed.  The name of 
+            # TODO the following line is a hack, should be addressed.  The name of
             # the surrogate model including the timestamp is not included in the config
             path = self.victim_model.path / Path(config["path"]).name
         super().__init__(
@@ -1009,7 +1031,9 @@ class SurrogateModelManager(ModelManagerBase):
         model_path is a path to a surrogate models checkpoint,
         they are stored under {victim_model_path}/surrogate_{time}/checkpoint.pt
         """
-        vict_model_path = Path(model_path).parent.parent / VictimModelManager.MODEL_FILENAME
+        vict_model_path = (
+            Path(model_path).parent.parent / VictimModelManager.MODEL_FILENAME
+        )
         load_folder = Path(model_path).parent
         conf = ModelManagerBase.loadConfig(load_folder)
         surrogate_manager = SurrogateModelManager(
@@ -1250,7 +1274,9 @@ def trainOneVictim(
     return a
 
 
-def continueVictimTrain(vict_path: Path, epochs: int = 1, gpu: int = -1, debug: int = None):
+def continueVictimTrain(
+    vict_path: Path, epochs: int = 1, gpu: int = -1, debug: int = None
+):
     manager = VictimModelManager.load(model_path=vict_path, gpu=gpu)
     manager.trainModel(num_epochs=epochs, debug=debug, replace=True)
 
@@ -1302,7 +1328,13 @@ def trainVictimModels(
     f.close()
 
 
-def profileAllVictimModels(gpu: int = 0, prefix: str = None, nvprof_args: dict = {}, count: int = 1, add: bool = False):
+def profileAllVictimModels(
+    gpu: int = 0,
+    prefix: str = None,
+    nvprof_args: dict = {},
+    count: int = 1,
+    add: bool = False,
+):
     """Victim models must be trained already."""
     for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
         vict_manager = VictimModelManager.load(model_path=vict_path, gpu=gpu)
@@ -1337,9 +1369,13 @@ def trainSurrogateModels(
         vict_manager = VictimModelManager.load(victim_path)
         vict_name = Path(victim_path).parent.name
         if predict:
-            arch, conf, model = vict_manager.predictVictimArch(model_type=arch_pred_model_name)
+            arch, conf, model = vict_manager.predictVictimArch(
+                model_type=arch_pred_model_name
+            )
         else:
-            print(f"Warning, predict is False, not predicting for model {vict_manager.path}")
+            print(
+                f"Warning, predict is False, not predicting for model {vict_manager.path}"
+            )
             arch = vict_manager.architecture
             arch_pred_model_name = None
             conf = 0.0
@@ -1352,7 +1388,9 @@ def trainSurrogateModels(
                 gpu=gpu,
                 save_model=save_model,
             )
-            surrogate_model.trainModel(num_epochs=epochs, patience=patience, debug=debug)
+            surrogate_model.trainModel(
+                num_epochs=epochs, patience=patience, debug=debug
+            )
             config.EMAIL.email_update(
                 start=start,
                 iter_start=iter_start,
@@ -1434,7 +1472,9 @@ def pruneVictimModels(
         )
 
 
-def loadProfilesToFolder(prefix: str="models", folder_name: str = "all_profiles", replace: bool = False):
+def loadProfilesToFolder(
+    prefix: str = "models", folder_name: str = "all_profiles", replace: bool = False
+):
     """
     For every victim model, loads all the profiles into cwd/prefix/name/
     which is organized by model folder
@@ -1448,7 +1488,9 @@ def loadProfilesToFolder(prefix: str="models", folder_name: str = "all_profiles"
     folder = Path.cwd() / prefix / folder_name
     if folder.exists():
         if not replace:
-            print(f"loadProfilesToFolder: folder already exists and replace is false, returning")
+            print(
+                f"loadProfilesToFolder: folder already exists and replace is false, returning"
+            )
             return
             # raise FileExistsError
         shutil.rmtree(folder)
@@ -1470,16 +1512,22 @@ def loadProfilesToFolder(prefix: str="models", folder_name: str = "all_profiles"
             shutil.copy(profile_path, new_path)
             file_count += 1
             all_config[str(new_name)] = config
-    
+
     # save config file
     config_path = folder / config_name
     with open(config_path, "w") as f:
         json.dump(all_config, f, indent=4)
-        
 
-def predictVictimArchs(model, folder: Path, name: str = "predictions", save: bool = True):
-    """Iterates through the profiles in <folder> which was generated 
-    by loadProfilesToFolder(), the architecture of each, and storing 
+
+def predictVictimArchs(
+    model: ArchPredBase,
+    folder: Path,
+    name: str = "predictions",
+    save: bool = True,
+    topk=5,
+):
+    """Iterates through the profiles in <folder> which was generated
+    by loadProfilesToFolder(), the architecture of each, and storing
     a report in a json file called <name>
     """
     assert folder.exists()
@@ -1491,30 +1539,50 @@ def predictVictimArchs(model, folder: Path, name: str = "predictions", save: boo
         config = json.load(f)
 
     total_tested = 0
-    total_correct = 0
+    total_correctk = {k: 0 for k in range(1, topk + 1)}
     family_correct = 0
     for profile_name in config:
         profile_path = folder / profile_name
-        profile_features = parse_one_profile(profile_path, gpu=config[profile_name]["gpu"])
-        arch, conf = model.predict(profile_features)
-        # print(
-        #     f"Predicted architecture for victim model {config[profile_name]['manager_name']} is {arch} with {conf * 100}% confidence."
-        # )
-        predictions[profile_name] = {"pred_arch": arch, "conf": conf, "true_arch": config[profile_name]["model"], "true_family": config[profile_name]["model_family"]}
+        profile_features = parse_one_profile(
+            profile_path, gpu=config[profile_name]["gpu"]
+        )
+        true_arch = config[profile_name]["model"]
+        true_family = config[profile_name]["model_family"]
+
+        preds = model.topKConf(profile_features, k=topk)
         total_tested += 1
-        predictions[profile_name]["correct"] = False
-        predictions[profile_name]["family_correct"] = False
-        if arch == config[profile_name]["model"]:
-            total_correct += 1
-            predictions[profile_name]["correct"] = True
-        if name_to_family[arch] == name_to_family[config[profile_name]["model"]]:
-            predictions[profile_name]["family_correct"] = True
-            family_correct += 1
+        for k in range(1, topk + 1):
+            top_k_preds = preds[:k]
+            correct = true_arch in [x[0] for x in top_k_preds]
+            if correct:
+                total_correctk[k] += 1
+            if k == 1:
+                pred_arch, conf = top_k_preds[0]
+                # print(
+                #     f"Predicted architecture for victim model {config[profile_name]['manager_name']} is {arch} with {conf * 100}% confidence."
+                # )
+                predictions[profile_name] = {
+                    "pred_arch": pred_arch,
+                    "conf": conf,
+                    "true_arch": true_arch,
+                    "true_family": true_family,
+                }
+                predictions[profile_name]["correct"] = correct
+                predictions[profile_name]["family_correct"] = False
+                if name_to_family[pred_arch] == true_family:
+                    predictions[profile_name]["family_correct"] = True
+                    family_correct += 1
+
+        predictions[profile_name]["topk_labels"] = [x[0] for x in top_k_preds]
+        predictions[profile_name]["topk_conf"] = [x[1] for x in top_k_preds]
+
     predictions["total_tested"] = total_tested
-    predictions["total_correct"] = total_correct
+    predictions["total_correctk"] = {k: total_correctk[k] for k in total_correctk}
     predictions["family_correct"] = family_correct
-    predictions["accuracy"] = total_correct/total_tested
-    predictions["family_accuracy"] = family_correct/total_tested
+    predictions["accuracy_k"] = {
+        k: total_correctk[k] / total_tested for k in total_correctk
+    }
+    predictions["family_accuracy"] = family_correct / total_tested
 
     print(json.dumps(predictions, indent=4))
 
@@ -1524,9 +1592,10 @@ def predictVictimArchs(model, folder: Path, name: str = "predictions", save: boo
             json.dump(predictions, f, indent=4)
 
 
-
 if __name__ == "__main__":
-    ans = input("You are running the model manager file.  Enter yes to continue, anything else to exit.")
+    ans = input(
+        "You are running the model manager file.  Enter yes to continue, anything else to exit."
+    )
     if not ans.lower() == "yes":
         exit(0)
     # trainAllVictimModels(1, debug=2, reverse=True)
@@ -1539,10 +1608,10 @@ if __name__ == "__main__":
     #     models = ['squeezenet1_0', 'squeezenet1_1']
     # )
     # time.sleep(100)
-    #profileAllVictimModels()
-    
-    #trainOneVictim(model_arch="mobilenet_v2", epochs=1, debug=1, save_model=False)
-    
+    # profileAllVictimModels()
+
+    # trainOneVictim(model_arch="mobilenet_v2", epochs=1, debug=1, save_model=False)
+
     # path = [x for x in VictimModelManager.getModelPaths() if str(x).find("mobilenet_v2") >= 0][0]
     # quant_manager = QuantizedModelManager(victim_model_path=path, save_model=False)
 
@@ -1557,4 +1626,3 @@ if __name__ == "__main__":
     # predictVictimArchs()
     trainSurrogateModels(predict=False)
     exit(0)
-    

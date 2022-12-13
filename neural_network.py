@@ -16,10 +16,17 @@ from sklearn.preprocessing import StandardScaler
 
 from model_metrics import correct
 
+
 class Net(torch.nn.Module):
-    def __init__(self, input_size, num_classes, hidden_layer_factor=0.5, layers=3):
+    def __init__(self, input_size, num_classes, hidden_layer_factor=None, layers=None):
         super().__init__()
-        self.construct_architecture(input_size, hidden_layer_factor, num_classes, layers)
+        if hidden_layer_factor is None:
+            hidden_layer_factor = 0.5
+        if layers is None:
+            layers = 3
+        self.construct_architecture(
+            input_size, hidden_layer_factor, num_classes, layers
+        )
         self.layer_count = layers
         self.x_tr = None
         self.x_test = None
@@ -27,9 +34,13 @@ class Net(torch.nn.Module):
         self.y_test = None
         self.accuracy = None
         self.scaler = None
-        self.device = device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.device = device = torch.device(
+            "cuda:0" if torch.cuda.is_available() else "cpu"
+        )
 
-    def construct_architecture(self, input_size, hidden_layer_factor, num_classes, layers):
+    def construct_architecture(
+        self, input_size, hidden_layer_factor, num_classes, layers
+    ):
         layer_count = 0
         hidden_layer_size = int(input_size * hidden_layer_factor)
         for i in range(layers):
@@ -54,7 +65,7 @@ class Net(torch.nn.Module):
     def get_preds(self, x, grad=False, normalize=True):
         if normalize:
             x = self.normalize(x)
-        x  = torch.tensor(x, dtype=torch.float32)
+        x = torch.tensor(x, dtype=torch.float32)
         x = x.to(self.device)
         with torch.set_grad_enabled(grad):
             output = self(x)
@@ -73,7 +84,7 @@ class Net(torch.nn.Module):
         """
         if isinstance(x, pd.DataFrame):
             x = x.to_numpy()
-        
+
         assert isinstance(x, np.ndarray)
         x = torch.from_numpy(x)
 
@@ -84,10 +95,11 @@ class Net(torch.nn.Module):
 
         # fit is false
         if not self.scaler:
-            raise ValueError("calling normalize with fit = False when there is no scaler set.")
+            raise ValueError(
+                "calling normalize with fit = False when there is no scaler set."
+            )
 
         return self.scaler.transform(x)
-
 
     def train_(self, x_tr, x_test, y_tr, y_test, epochs=100, lr=0.1, verbose=True):
         # format data
@@ -101,7 +113,6 @@ class Net(torch.nn.Module):
         y_tr = torch.tensor(y_tr, dtype=torch.long)
         y_test = torch.tensor(y_test, dtype=torch.long)
 
-
         since = time.time()
         test_loss_history = []
         test_acc_history = []
@@ -110,7 +121,9 @@ class Net(torch.nn.Module):
 
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.SGD(self.parameters(), lr, momentum=0.9)
-        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, cooldown=3)
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, patience=5, cooldown=3
+        )
         # optimizer = optim.Adam(model.parameters(), lr=lr)
 
         x_tr = x_tr.to(self.device)
@@ -148,22 +161,39 @@ class Net(torch.nn.Module):
             test3_acc = test_acc[1] / len(y_test)
             test_acc_history.append(test_acc)
             if verbose:
-                print("epoch {}\nTrain set - loss: {}, accuracy1: {}, accuracy3: {}\n"
+                print(
+                    "epoch {}\nTrain set - loss: {}, accuracy1: {}, accuracy3: {}\n"
                     "Test  set - loss: {}, accuracy1: {}, accuracy3: {}\n"
-                    "learning rate: {}"
-                    .format(str(epoch), str(train_loss), str(train1_acc), str(train3_acc),
-                            str(test_loss), str(test1_acc), str(test3_acc),
-                            str(actual_lr)))
+                    "learning rate: {}".format(
+                        str(epoch),
+                        str(train_loss),
+                        str(train1_acc),
+                        str(train3_acc),
+                        str(test_loss),
+                        str(test1_acc),
+                        str(test3_acc),
+                        str(actual_lr),
+                    )
+                )
         if verbose:
             time_elapsed = time.time() - since
-            print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+            print(
+                "Training complete in {:.0f}m {:.0f}s".format(
+                    time_elapsed // 60, time_elapsed % 60
+                )
+            )
 
         # self.x_tr = x_tr
         # self.x_test = x_test
         # self.y_tr = y_tr
         # self.y_test = y_test
 
-        return training_acc_history, test_acc_history, training_loss_history, test_loss_history
+        return (
+            training_acc_history,
+            test_acc_history,
+            training_loss_history,
+            test_loss_history,
+        )
 
     def train_test_accuracy(self):
         y_tr_pred = self.get_preds(self.x_tr)
@@ -171,4 +201,3 @@ class Net(torch.nn.Module):
         y_test_pred = self.get_preds(self.y_test)
         test_acc = correct(y_test_pred, self.y_test)
         return train_acc, test_acc
-
