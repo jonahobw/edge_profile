@@ -178,8 +178,8 @@ if __name__ == "__main__":
         with open(file, "w") as f:
             json.dump(save_args, f, indent=4)
     start = time.time()
-    try:
-        for model_num, model in enumerate(models_to_profile):
+    for model_num, model in enumerate(models_to_profile):
+        try:
             model_folder = profile_folder / model
             model_folder.mkdir(parents=True, exist_ok=True)
             log_file_prefix = model_folder / model
@@ -239,9 +239,11 @@ if __name__ == "__main__":
             print("Allowing GPUs to cool between models ...")
             time.sleep(args.sleep)
 
+        except Exception as e:
+            tb = traceback.format_exc()
+            config.EMAIL.email(f"PROGRAM CRASHED During Profile Collection for {model}", f"{tb}\n\n{dict_to_str(save_args)}")
+            raise e
+            
         if args.nosave:
             shutil.rmtree(profile_folder)
-    except Exception as e:
-        tb = traceback.format_exc()
-        config.EMAIL.email("PROGRAM CRASHED", f"{tb}\n\n{dict_to_str(save_args)}")
-        raise e
+    

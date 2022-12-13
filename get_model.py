@@ -94,17 +94,18 @@ def getModelParams(model_arch: str):
     return model_params.get(model_arch, {})
 
 def get_model(model_arch:str, pretrained=False, kwargs={}):
+    """If pretrained is true, does not pass kwargs"""
     model_arch = model_arch.lower()
     if model_arch not in name_to_family:
         raise ValueError(f"Model {model_arch} not supported")
     model_params = getModelParams(model_arch)
-    if "kwargs" in model_params:
+    if "kwargs" in model_params and not pretrained:
         kwargs.update(model_params["kwargs"])
     if "num_classes" in kwargs and pretrained:
         num_classes = kwargs["num_classes"]
         kwargs.pop("num_classes")
         model = getattr(models, model_arch)(pretrained=pretrained, **kwargs)
-        success = fixLastLayer(model, model_arch)
+        success = fixLastLayer(model, model_arch, num_classes)
         if not success:
             print("Cannot reset number of classes on pretrained model, will default to 1000.")
         return model
@@ -130,7 +131,7 @@ def get_quantized_model(model_arch: str, kwargs={}):
     return None
 
 
-def fixLastLayer(model: torch.nn.Module, architecture: str) -> bool:
+def fixLastLayer(model: torch.nn.Module, architecture: str, num_classes: int) -> bool:
     # TODO implement finetuning changing the last layer see here
     # https://pytorch.org/tutorials/beginner/finetuning_torchvision_models_tutorial.html
     supported_models = []   #["mnasnet1_3"]

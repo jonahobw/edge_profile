@@ -160,10 +160,10 @@ class NNArchPred(ArchPredBase):
 
 
 class LRArchPred(ArchPredBase):
-    def __init__(self, df, label=None, verbose=True, name = "lr"):
+    def __init__(self, df, label=None, verbose=True, name = "lr", multi_class: str="auto", penalty: str = "l2"):
         super().__init__(df=df, name=name, label=label, verbose=verbose)
         # self.pipe = make_pipeline(StandardScaler(), LogisticRegression())
-        self.model = make_pipeline(StandardScaler(), Normalizer(), LogisticRegression())
+        self.model = make_pipeline(StandardScaler(), Normalizer(), LogisticRegression(multi_class=multi_class, penalty=penalty))
         self.model.fit(self.x_tr, self.y_train)
         acc = self.model.score(self.x_test, self.y_test)
         print(f"Logistic Regression acc: {acc}")
@@ -182,9 +182,9 @@ class LRArchPred(ArchPredBase):
 
 
 class LRArchPredRFE:
-    def __init__(self, df, label=None, verbose=True, rfe_num: int = 200, name="lr_rfe") -> None:
+    def __init__(self, df, label=None, verbose=True, rfe_num: int = 200, name="lr_rfe", multi_class: str="auto", penalty: str = "l2") -> None:
         super().__init__(df=df, name=name, label=label, verbose=verbose)
-        self.estimator = LogisticRegression()
+        self.estimator = LogisticRegression(multi_class=multi_class, penalty=penalty)
         self.rfe_num = rfe_num
         self.rfe = RFE(
             estimator=self.estimator,
