@@ -124,7 +124,21 @@ def parse_one_aggregate_profile(csv_file=None, example=False, nrows=None, skipro
 
     gpu_prof = pd.read_csv(csv_file, header=0, skiprows=skiprows, nrows=nrows)
     gpu_prof = gpu_prof.rename(columns=gpu_columns)
-    gpu_prof = gpu_prof.drop(0)
+    units_row = gpu_prof.iloc[0]
+    gpu_prof = gpu_prof.drop(0, axis=0) # drop the units row
+    # gpu_prof = gpu_prof.dropna(axis=0)  # drop rows with NaN
+    # fix the units!!!!!!
+    for col in ["time_ms", "avg_us", "min_us", "max_ms"]:
+        unit = col.split("_")[1]
+        if units_row[col] != unit:
+            assert units_row[col] in ["ms", "us"], f"Profile {csv_file} column {col} has unit {units_row[col]}"
+            # unit is wrong, since we only have us or ms, convert to the other
+            if units_row[col] == "ms":
+                # convert to us, multiply by 1000
+                gpu_prof[col] = pd.to_numeric(gpu_prof[col]) * 1000
+            else:
+                # unit is in us, convert to ms, divide by 1000
+                gpu_prof[col] = pd.to_numeric(gpu_prof[col]) / 1000
 
     attribute_cols = [
         "time_percent",

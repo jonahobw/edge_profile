@@ -23,20 +23,19 @@ from format_profiles import parse_one_profile
 from architecture_prediction import get_arch_pred_model, ArchPredBase
 from model_manager import predictVictimArchs
 from config import SYSTEM_SIGNALS
+from utils import latest_file
 
 
-def parse_prof(profile_csv=None, config_file=None):
+def parse_prof(profile_csv=None, config_file=None, gpu=0):
     if profile_csv is None:
         profile_csv = Path(
             "/Users/jgow98/Library/CloudStorage/OneDrive-UniversityofMassachusetts/2Grad/research/model_extraction/code/edge_profile/models/resnet50/resnet50_20221012-014421/profiles/profile_1802702.csv"
         )
-    if config_file is None:
-        config_file = Path(
-            "/Users/jgow98/Library/CloudStorage/OneDrive-UniversityofMassachusetts/2Grad/research/model_extraction/code/edge_profile/models/resnet50/resnet50_20221012-014421/profiles/params_1802702.json"
-        )
-    with open(config_file, "r") as f:
-        conf = json.load(f)
-    return parse_one_profile(profile_csv, gpu=conf["gpu"])
+    if config_file is not None:
+        with open(config_file, "r") as f:
+            conf = json.load(f)
+        gpu=conf["gpu"]
+    return parse_one_profile(profile_csv, gpu=gpu)
 
 
 def series_to_df(ser):
@@ -538,8 +537,8 @@ def combineProfiles(folder: Path = None, weight: int = 1):
         raise e
 
 
-def getDF(path: Path = None):
-    to_keep_path = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe"
+def getDF(path: Path = None, save_path: Path = None):
+    to_keep_path = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe_pretrained"
     if path is None:
         path = to_keep_path
     df = all_data(path, no_system_data=False)
@@ -548,15 +547,32 @@ def getDF(path: Path = None):
     # remove cols of df if they aren't in keep_df
     df = removeColumnsFromOther(keep_df, df)
 
-    # exclude_cols = SYSTEM_SIGNALS
-    # exclude_cols.extend(["mem"])
+    exclude_cols = SYSTEM_SIGNALS
+    exclude_cols.extend(["mem"])
     # exclude_cols.extend(["avg_ms", "time_ms", "max_ms", "min_us"])
-    # exclude_cols.extend(["memcpy", "Malloc", "memset"])#, "avg_us", "time_ms", "max_ms", "min_us", "indicator"])
-    # df = remove_cols(df, substrs=exclude_cols)
+    exclude_cols.extend(["memcpy", "Malloc", "malloc", "memset"])#, "avg_us", "time_ms", "max_ms", "min_us", "indicator"])
+    df = remove_cols(df, substrs=exclude_cols)
     # df = filter_cols(df, substrs=["indicator"])
+    # df = filter_cols(df, substrs=["num_calls"])
+    df = filter_cols(df, substrs=["num_calls", "indicator"])
+    # df = filter_cols(df, substrs=["num_calls", "time_percent", "indicator"])
     # df = filter_cols(df, substrs=["gemm", "conv", "volta", "void", "indicator", "num_calls", "time_percent"])
+    # df = filter_cols(df, substrs=["void im2col4d_kernel<float, int>(im2col4d_params"])
     print(f"Number of remaining dataframe columns: {len(df.columns)}")
+    if save_path is not None:
+        df.to_csv(save_path)
     return df
+
+
+def saveProfileFeatures(df, arch: str):
+    profile_folder = Path.cwd() / "victim_profiles"
+    profile_csv = latest_file(profile_folder, pattern=f"*{arch}*")
+    features = parse_one_profile(profile_csv)
+    features = add_indicator_cols_to_input(
+        df, features, exclude=["file", "model", "model_family"]
+    )
+    features = series_to_df(features)
+    features.to_csv(Path.cwd() / f"temp_profile_{arch}.csv")
 
 
 if __name__ == "__main__":
@@ -571,26 +587,29 @@ if __name__ == "__main__":
 
     # orig, x = transform_input(arch_model=arch_model, use_means=True)
     # diff = analyze_diff(orig, x)
-    # excl = SYSTEM_SIGNALS
-    # excl.append("memcpy")
-    # excl.append("Malloc")
-    # excl.append("memset")
-    # excl.append("avg_us")
-    # excl.append("time_ms")
-    # excl.append("max_ms")
-    # excl.append("min_us")
-    # model = predict_all_victim_profiles(exclude_cols=excl)
+
+    save_path = None
+    # save_path = folder = Path.cwd() / "temp_agg_data.csv"
 
     # this is the training data
     # folder = Path.cwd() / "profiles" / "all_profiles"
-    folder = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe"
-    df = getDF(path=folder)
+    folder = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe_pretrained"
+    df = getDF(path=folder, save_path=save_path)
 
-    model = get_arch_pred_model("lr", df=df, kwargs={"multi_class": 'multinomial', "penalty": "none"})
-    # model = LRArchPredRFE(df, rfe_num=800, verbose=True)
+    # saveProfileFeatures(df, "resnet50")
+
+    # model = get_arch_pred_model("nn", df=df)
+    model = get_arch_pred_model("nn", df=df, kwargs={"num_layers": 5, "hidden_layer_factor": 1})
+    # model = get_arch_pred_model("lr", df=df, kwargs={"multi_class": 'multinomial', "penalty": "l2"})    # these are the default args
+    # model = get_arch_pred_model("lr", df=df, kwargs={"multi_class": 'multinomial', "penalty": "none"})
+    # model = get_arch_pred_model("lr", df=df, kwargs={"multi_class": 'ovr', "penalty": "none"})
+    # model = get_arch_pred_model("lr", df=df, kwargs={"multi_class": 'ovr', "penalty": "l2"})
+    # model = get_arch_pred_model("lr_rfe", df=df, kwargs={"rfe_num": 800, "verbose": False})
     # model.printFeatureRank(save_path=Path.cwd(), suppress_output=True)
-    # model.printFeatures()
+    model.printFeatures()
+    model.evaluateTest()
+    a = input(f"Enter anything to continue")
 
-    folder = Path.cwd() / "models" / "all_profiles"
+    folder = Path.cwd() / "victim_profiles"
 
     predictVictimArchs(model, folder, save=False)

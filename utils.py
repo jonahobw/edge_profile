@@ -17,17 +17,22 @@ def getSystem() -> str:
     return system
 
 
-def latest_file(path: Path, pattern: str = "*") -> Path:
-    """Return the latest file in the folder <path>"""
+def latest_file(path: Path, pattern: str = "*", oldest: bool = False) -> Path:
+    """Return the latest file in the folder <path>.  If oldest is true, return oldest file."""
     files = [x for x in path.glob(pattern)]
     if len(files) == 0:
         print(f"Warning: no files with pattern {pattern} found in folder {path}")
         return None
-    return latestFileFromList(files)
+    return latestFileFromList(files, oldest=oldest)
 
-def latestFileFromList(paths: List[Path]) -> Path:
-    """Given a list of paths, return the path of the latest file."""
+def latestFileFromList(paths: List[Path], oldest: bool = False) -> Path:
+    """
+    Given a list of paths, return the path of the latest file.
+    If oldest is true, return oldest file.
+    """
     # source https://stackoverflow.com/questions/39327032/how-to-get-the-latest-file-in-a-folder
+    if oldest:
+        return min(paths, key=lambda x: x.stat().st_ctime)
     return max(paths, key=lambda x: x.stat().st_ctime)
 
 def dict_to_str(dictionary, indent: int = 4) -> str:

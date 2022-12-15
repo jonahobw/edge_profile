@@ -114,7 +114,7 @@ if __name__ == "__main__":
         "-folder",
         type=str,
         default=None,
-        help="Name of subfolder under cwd/profiles/ to save these profiles to.  "
+        help="Name of subfolder under cwd/profiles/<gpu_name>/ to save these profiles to.  "
         "Default is the date and time.",
     )
     parser.add_argument(

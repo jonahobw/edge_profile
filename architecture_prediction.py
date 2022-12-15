@@ -27,15 +27,6 @@ from data_engineering import (
 from neural_network import Net
 from config import SYSTEM_SIGNALS
 
-
-def get_arch_pred_model(model_type, df=None, label=None, kwargs: dict = {}):
-    if df is None:
-        path = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe"
-        df = all_data(path)
-    arch_model = {"nn": NNArchPred, "lr": LRArchPred, "lr_rfe": LRArchPredRFE}
-    return arch_model[model_type](df=df, label=label, **kwargs)
-
-
 class ArchPredBase(ABC):
     def __init__(self, df, name: str, label=None, verbose=True) -> None:
         if label is None:
@@ -107,6 +98,13 @@ class ArchPredBase(ABC):
         result = sorted(result, key=lambda x: x[1], reverse=True)
         return result
 
+    def printFeatures(self):
+        for i, col in enumerate(self.orig_cols):
+            print(f"Feature {i}:\t{col[:80]}")
+    
+    def evaluateTest(self):
+        acc = self.model.score(self.x_test, self.y_test)
+        print(f"Logistic Regression acc: {acc}")
 
 class NNArchPred(ArchPredBase):
     def __init__(
@@ -128,7 +126,6 @@ class NNArchPred(ArchPredBase):
             self.x_tr, self.x_test, self.y_train, self.y_test, verbose=verbose
         )
         self.model.eval()
-        self.validate_preds()
 
     def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
         if preprocess:
@@ -143,7 +140,7 @@ class NNArchPred(ArchPredBase):
         label = self.label_encoder.inverse_transform(np.array([pred]))
         return label[0], conf.item()
 
-    def validate_preds(self):
+    def evaluateTrain(self):
         train_preds = self.model.get_preds(self.x_tr, normalize=False)
         pred = train_preds.argmax(dim=1).cpu()
         train_pred_labels = self.label_encoder.inverse_transform(np.array(pred))
@@ -151,6 +148,7 @@ class NNArchPred(ArchPredBase):
         correct1 = sum(train_pred_labels == y_train_labels)
         print(f"X_train acc1: {correct1 / len(self.y_train)}")
 
+    def evaluateTest(self):
         test_preds = self.model.get_preds(self.x_test, normalize=False)
         pred = test_preds.argmax(dim=1).cpu()
         test_pred_labels = self.label_encoder.inverse_transform(np.array(pred))
@@ -181,7 +179,7 @@ class LRArchPred(ArchPredBase):
         return label[0], conf.item()
 
 
-class LRArchPredRFE:
+class LRArchPredRFE(ArchPredBase):
     def __init__(self, df, label=None, verbose=True, rfe_num: int = 200, name="lr_rfe", multi_class: str="auto", penalty: str = "l2") -> None:
         super().__init__(df=df, name=name, label=label, verbose=verbose)
         self.estimator = LogisticRegression(multi_class=multi_class, penalty=penalty)
@@ -195,14 +193,15 @@ class LRArchPredRFE:
             StandardScaler(), Normalizer(), self.rfe, self.estimator
         )
         self.model.fit(self.x_test, self.y_test)
-        self.printFeatures()
+        if self.verbose:
+            self.printFeatures()
         acc = self.model.score(self.x_test, self.y_test)
         print(f"Logistic Regression acc: {acc}")
 
     def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
         if preprocess:
             x = self.preprocessInput(x)
-        preds = self.pipe.decision_function(x)[0]
+        preds = self.model.decision_function(x)[0]
         return softmax(preds)
 
     def predict(self, x: pd.Series, preprocess=True) -> Tuple[str, float]:
@@ -249,6 +248,15 @@ class LRArchPredRFE:
                     print(s[:80])
         if save_path is not None:
             f.close()
+
+
+
+def get_arch_pred_model(model_type, df=None, label=None, kwargs: dict = {}) -> ArchPredBase:
+    if df is None:
+        path = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe"
+        df = all_data(path)
+    arch_model = {"nn": NNArchPred, "lr": LRArchPred, "lr_rfe": LRArchPredRFE}
+    return arch_model[model_type](df=df, label=label, **kwargs)
 
 
 if __name__ == "__main__":

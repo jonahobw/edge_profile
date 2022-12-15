@@ -243,17 +243,33 @@ def add_indicator_columns(df):
 
     Since GPU data is split into 6 features (min, max, avg, num_calls, time_ms, time_percent),
     only 1 indicator column will be added for each of these 6 features.
+    
+    Indicators have the name indicator_<meta_feature>.  For example, a meta
+    feature is [CUDA memcpy DtoD] which is associated with features
+    avg_us_[CUDA memcpy DtoD], max_ms_[CUDA memcpy DtoD], min_us_[CUDA memcpy DtoD]
+    time_percent_[CUDA memcpy DtoD], time_ms_[CUDA memcpy DtoD], num_calls_[CUDA memcpy DtoD].
+
+    There will only be one indicator per meta feature.
     """
-    completed = []
-    prefixes = ['min_', 'max_', 'avg_', 'num_calls_', 'time_ms_', 'time_percent_']
-    #todo finish this feature of only adding 1 indicator per feature (see docstring)
+    prefixes = ['min_us_', 'max_ms_', 'avg_us_', 'num_calls_', 'time_ms_', 'time_percent_']
+    
+    def stripPrefix(col_name: str) -> str:
+        for prefix in prefixes:
+            if col_name.startswith(prefix):
+                return col_name[len(prefix):]
+        raise ValueError
+    
     for col in df.columns:
         column = df[col]
         if column.isna().sum() > 0:
             indicator_col = column.notna().astype(int)
-            indicator_col.name = f"indicator_{col}"
+            indicator_col.name = f"indicator_{stripPrefix(col)}"
             mean = column.mean()
             df[col] = df[col].fillna(mean)
+            # before adding the column, check if the indicator for this feature has
+            # already been added
+            if indicator_col.name in df.columns:
+                continue
             df = pd.concat([df, indicator_col], axis=1)
         if df[col].isna().sum() > 0:
             raise RuntimeError(f"Still NaNs in column {col}")
@@ -266,17 +282,31 @@ def add_indicator_cols_to_input(df, x: pd.Series, exclude: list = []) -> pd.Seri
     columns as df.  Replace missing values in x with mean.  Return
     new x.  Drop columns of x that are not in df.
     Excluded columns are skipped.
+
+    Indicators have the name indicator_<meta_feature>.  For example, a meta
+    feature is [CUDA memcpy DtoD] which is associated with features
+    avg_us_[CUDA memcpy DtoD], max_ms_[CUDA memcpy DtoD], min_us_[CUDA memcpy DtoD]
+    time_percent_[CUDA memcpy DtoD], time_ms_[CUDA memcpy DtoD], num_calls_[CUDA memcpy DtoD].
+
+    There will only be one indicator per meta feature.
+
+    Therefore to check if an input x has a meta_feature, you have to see if any of the
+    features avg_ms_{meta_feature}, max_ms_(meta_feature), ... exist in x.
     """
 
     # first add indicators
     for col in df.columns:
-        # filter out non-indicator columns
+        # only look at indicator columns in the reference df
         if col in exclude or not col.startswith("indicator_"):
             continue
-        original_name = col.split("indicator_")[1]
-        if original_name in x.keys():
-            x[col] = 1
-        else:
+        meta_feature = col.split("indicator_")[1]
+        found = False
+        for col_name in x.keys():
+            if col_name.find(meta_feature) >= 0:
+                x[col] = 1
+                found = True
+                break
+        if not found:
             x[col] = 0
     
     # now all indicator columns are added, fill in missing

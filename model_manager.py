@@ -1536,11 +1536,12 @@ def pruneVictimModels(
 
 
 def loadProfilesToFolder(
-    prefix: str = "victim_profiles", folder_name: str = "all_profiles", replace: bool = False, filters: dict=None, all: bool = True
+    prefix: str = "models", folder_name: str = "victim_profiles", replace: bool = False, filters: dict=None, all: bool = True
 ):
     """
     For every victim model, loads all the profiles into cwd/prefix/name/
     which is organized by model folder
+    folder_name: results will be stored to cwd/folder_name
     Additionally creates a config json file where the keys are the paths to the profiles
     and the values are dicts of information about the profile such as path to actual profile,
     actual model architecture and architecture family, and model name.
@@ -1552,7 +1553,7 @@ def loadProfilesToFolder(
     config_name = "config.json"
     all_config = {}
 
-    folder = Path.cwd() / prefix / folder_name
+    folder = Path.cwd() / folder_name
     if folder.exists():
         if not replace:
             print(
@@ -1566,7 +1567,9 @@ def loadProfilesToFolder(
     file_count = 0
 
     vict_model_paths = VictimModelManager.getModelPaths(prefix=prefix)
+    print(f"All model paths: {vict_model_paths}")
     for vict_path in vict_model_paths:
+        print(f"Getting profiles for {vict_path.parent.name}...")
         manager = VictimModelManager.load(vict_path)
         profiles = manager.getAllProfiles(filters=filters)
         if not all:
@@ -1581,6 +1584,7 @@ def loadProfilesToFolder(
             shutil.copy(profile_path, new_path)
             file_count += 1
             all_config[str(new_name)] = config
+            print(f"\tSaved Profile {profile_path.name} to {new_path}")
 
     # save config file
     config_path = folder / config_name
@@ -1667,6 +1671,9 @@ if __name__ == "__main__":
     )
     if not ans.lower() == "yes":
         exit(0)
+    
+    quantizeVictimModels()
+    pruneVictimModels(gpu=0)
     # trainAllVictimModels(1, debug=2, reverse=True)
     # profileAllVictimModels()
     # trainSurrogateModels(reverse=False, gpu=-1)
@@ -1691,7 +1698,7 @@ if __name__ == "__main__":
     # surrogate_manager.trainModel(num_epochs=2, debug=2, replace=True)
 
     # surrogate_manager.transferAttackPGD(eps=8/255, step_size=2/255, iterations=10, debug=1)
-    loadProfilesToFolder(all=False)
+    # loadProfilesToFolder(all=False, replace=True)
     # predictVictimArchs()
     # trainSurrogateModels(predict=False)
     exit(0)
