@@ -939,7 +939,11 @@ class PruneModelManager(ProfiledModelManager):
 
     def paramsToPrune(self) -> List[Tuple[torch.nn.Module, str]]:
         res = []
-        for _, module in self.model.named_modules():
+        for name, module in self.model.named_modules():
+            if name.startswith("classifier"):
+                continue
+            if name.startswith("fc") >= 0:
+                continue
             if hasattr(module, "weight"):
                 res.append((module, "weight"))
         self.pruned_modules = res
@@ -1672,7 +1676,12 @@ if __name__ == "__main__":
     if not ans.lower() == "yes":
         exit(0)
     
-    quantizeVictimModels()
+    # arch = "alexnet"
+    # vict_paths = VictimModelManager.getModelPaths()
+    # arch_path = [x for x in vict_paths if x.find(arch) >= 0][0]
+    # manager = QuantizedModelManager(arch_path)
+
+    # quantizeVictimModels()
     pruneVictimModels(gpu=0)
     # trainAllVictimModels(1, debug=2, reverse=True)
     # profileAllVictimModels()
