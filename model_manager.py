@@ -942,7 +942,7 @@ class PruneModelManager(ProfiledModelManager):
         for name, module in self.model.named_modules():
             if name.startswith("classifier"):
                 continue
-            if name.startswith("fc") >= 0:
+            if name.startswith("fc"):
                 continue
             if hasattr(module, "weight"):
                 res.append((module, "weight"))
