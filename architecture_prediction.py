@@ -9,9 +9,13 @@ import numpy as np
 from abc import ABC, abstractmethod
 
 from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import NearestCentroid, KNeighborsClassifier
+from sklearn.neural_network import MLPClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler, LabelEncoder, Normalizer
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler, Normalizer
 from sklearn.feature_selection import RFE
 from sklearn.metrics import f1_score
 import pandas as pd
@@ -27,8 +31,9 @@ from data_engineering import (
 from neural_network import Net
 from config import SYSTEM_SIGNALS
 
+
 class ArchPredBase(ABC):
-    def __init__(self, df, name: str, label=None, verbose=True) -> None:
+    def __init__(self, df, name: str, label=None, verbose=True, deterministic=True) -> None:
         if label is None:
             label = "model"
         self.verbose = verbose
@@ -37,7 +42,7 @@ class ArchPredBase(ABC):
         self.label = label
         self.label_encoder = LabelEncoder()
         all_x, all_y = get_data_and_labels(self.data, shuffle=False, label=label)
-        self.orig_cols = all_x.columns
+        self.orig_cols = list(all_x.columns)
         all_y_labeled = self.label_encoder.fit_transform(all_y)
         x_tr, x_test, y_train, y_test = train_test_split(
             all_x, all_y_labeled, random_state=42
@@ -51,6 +56,7 @@ class ArchPredBase(ABC):
 
         # overwritten by subclasses
         self.model = None
+        self.deterministic = deterministic
 
     def preprocessInput(self, x: pd.Series):
         x = add_indicator_cols_to_input(
@@ -101,129 +107,37 @@ class ArchPredBase(ABC):
     def printFeatures(self):
         for i, col in enumerate(self.orig_cols):
             print(f"Feature {i}:\t{col[:80]}")
-    
-    def evaluateTest(self):
+
+    def evaluateTrain(self) -> float:
+        acc = self.model.score(self.x_tr, self.y_train)
+        print(f"{self.name} train acc: {acc}")
+        return acc
+
+    def evaluateTest(self) -> float:
         acc = self.model.score(self.x_test, self.y_test)
-        print(f"Logistic Regression acc: {acc}")
-
-class NNArchPred(ArchPredBase):
-    def __init__(
-        self, df, label=None, verbose=True, hidden_layer_factor=None, num_layers=None, name="nn"
-    ):
-        super().__init__(df=df, name=name, label=label, verbose=verbose)
-        print(
-            f"Instantiating neural net with {self.num_classes} classes and input size of {self.input_size}"
-        )
-        self.model = Net(
-            input_size=self.input_size,
-            num_classes=self.num_classes,
-            hidden_layer_factor=hidden_layer_factor,
-            layers=num_layers,
-        )
-        self.x_tr = self.model.normalize(self.x_tr, fit=True)
-        self.x_test = self.model.normalize(self.x_test)
-        self.model.train_(
-            self.x_tr, self.x_test, self.y_train, self.y_test, verbose=verbose
-        )
-        self.model.eval()
-
-    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
-        if preprocess:
-            x = self.preprocessInput(x)
-        preds = self.model.get_preds(x)
-        return preds.cpu().numpy()
-
-    def predict(self, x: pd.Series, preprocess=True) -> Tuple[str, float]:
-        preds = self.getConfidenceScores(x, preprocess)
-        pred = preds.argmax()
-        conf = preds[pred]
-        label = self.label_encoder.inverse_transform(np.array([pred]))
-        return label[0], conf.item()
-
-    def evaluateTrain(self):
-        train_preds = self.model.get_preds(self.x_tr, normalize=False)
-        pred = train_preds.argmax(dim=1).cpu()
-        train_pred_labels = self.label_encoder.inverse_transform(np.array(pred))
-        y_train_labels = self.label_encoder.inverse_transform(np.array(self.y_train))
-        correct1 = sum(train_pred_labels == y_train_labels)
-        print(f"X_train acc1: {correct1 / len(self.y_train)}")
-
-    def evaluateTest(self):
-        test_preds = self.model.get_preds(self.x_test, normalize=False)
-        pred = test_preds.argmax(dim=1).cpu()
-        test_pred_labels = self.label_encoder.inverse_transform(np.array(pred))
-        y_test_labels = self.label_encoder.inverse_transform(np.array(self.y_test))
-        correct1 = sum(test_pred_labels == y_test_labels)
-        print(f"X_test acc1: {correct1 / len(self.y_test)}")
+        print(f"{self.name} test acc: {acc}")
+        return acc
 
 
-class LRArchPred(ArchPredBase):
-    def __init__(self, df, label=None, verbose=True, name = "lr", multi_class: str="auto", penalty: str = "l2"):
-        super().__init__(df=df, name=name, label=label, verbose=verbose)
-        # self.pipe = make_pipeline(StandardScaler(), LogisticRegression())
-        self.model = make_pipeline(StandardScaler(), Normalizer(), LogisticRegression(multi_class=multi_class, penalty=penalty))
-        self.model.fit(self.x_tr, self.y_train)
-        acc = self.model.score(self.x_test, self.y_test)
-        print(f"Logistic Regression acc: {acc}")
-
-    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
-        if preprocess:
-            x = self.preprocessInput(x)
-        return softmax(self.model.decision_function(x)[0])
-
-    def predict(self, x: pd.Series, preprocess=True) -> Tuple[str, float]:
-        preds = self.getConfidenceScores(x, preprocess)
-        pred = preds.argmax()
-        conf = preds[pred]
-        label = self.label_encoder.inverse_transform(np.array([pred]))
-        return label[0], conf.item()
-
-
-class LRArchPredRFE(ArchPredBase):
-    def __init__(self, df, label=None, verbose=True, rfe_num: int = 200, name="lr_rfe", multi_class: str="auto", penalty: str = "l2") -> None:
-        super().__init__(df=df, name=name, label=label, verbose=verbose)
-        self.estimator = LogisticRegression(multi_class=multi_class, penalty=penalty)
-        self.rfe_num = rfe_num
-        self.rfe = RFE(
-            estimator=self.estimator,
-            n_features_to_select=self.rfe_num,
-            verbose=10 if self.verbose else 0,
-        )
-        self.model = make_pipeline(
-            StandardScaler(), Normalizer(), self.rfe, self.estimator
-        )
-        self.model.fit(self.x_test, self.y_test)
-        if self.verbose:
-            self.printFeatures()
-        acc = self.model.score(self.x_test, self.y_test)
-        print(f"Logistic Regression acc: {acc}")
-
-    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
-        if preprocess:
-            x = self.preprocessInput(x)
-        preds = self.model.decision_function(x)[0]
-        return softmax(preds)
-
-    def predict(self, x: pd.Series, preprocess=True) -> Tuple[str, float]:
-        preds = self.getConfidenceScores(x, preprocess)
-        pred = preds.argmax()
-        conf = preds[pred]
-        label = self.label_encoder.inverse_transform(np.array([pred]))
-        return label[0], conf.item()
-
+class RFEArchPred(ArchPredBase):
     def printFeatures(self):
+        if not hasattr(self.rfe, "support_"):
+            return
         print("Remaining Features:")
         support = self.rfe.support_
         for i, col_name in enumerate(self.orig_cols):
             if support[i]:
                 print(f"Feature {i}:\t{col_name[:80]}")
 
-    def printFeatureRank(self, save_path: Path = None, suppress_output: bool = False):
-        if save_path is None and suppress_output:
-            raise ValueError
-        print(
-            "Feature Ranking (Note only ranks features which aren't part of the model):"
-        )
+    def featureRank(
+        self, save_path: Path = None, suppress_output: bool = False
+    ) -> List[str]:
+        if not hasattr(self.rfe, "support_"):
+            return
+        if not suppress_output:
+            print(
+                "Feature Ranking (Note only ranks features which aren't part of the model):"
+            )
         if save_path is not None:
             save_file = Path(save_path) / "feature_ranking.txt"
             f = open(save_file, "w+")
@@ -248,15 +162,370 @@ class LRArchPredRFE(ArchPredBase):
                     print(s[:80])
         if save_path is not None:
             f.close()
+        result = []
+        for rank in sorted(ranking.keys()):
+            result.append(ranking[rank])
+        return result
 
 
+class SKLearnClassifier(ArchPredBase):
+    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
+        if preprocess:
+            x = self.preprocessInput(x)
+        preds = self.model.decision_function(x)[0]
+        return softmax(preds)
 
-def get_arch_pred_model(model_type, df=None, label=None, kwargs: dict = {}) -> ArchPredBase:
+    def predict(self, x: pd.Series, preprocess=True) -> Tuple[str, float]:
+        preds = self.getConfidenceScores(x, preprocess)
+        pred = preds.argmax()
+        conf = preds[pred]
+        label = self.label_encoder.inverse_transform(np.array([pred]))
+        return label[0], conf.item()
+
+
+class NNArchPred(ArchPredBase):
+    NAME = "nn_old"
+
+    def __init__(
+        self,
+        df,
+        label=None,
+        verbose=True,
+        hidden_layer_factor=None,
+        num_layers=None,
+        name=None,
+        epochs: int = 100,
+    ):
+        if name is None:
+            name = self.NAME
+        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False)
+        print(
+            f"Instantiating neural net with {self.num_classes} classes and input size of {self.input_size}"
+        )
+        self.model = Net(
+            input_size=self.input_size,
+            num_classes=self.num_classes,
+            hidden_layer_factor=hidden_layer_factor,
+            layers=num_layers,
+        )
+        self.x_tr = self.model.normalize(self.x_tr, fit=True)
+        self.x_test = self.model.normalize(self.x_test)
+        self.model.train_(
+            self.x_tr,
+            self.x_test,
+            self.y_train,
+            self.y_test,
+            verbose=verbose,
+            epochs=epochs,
+        )
+        self.model.eval()
+
+    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
+        if preprocess:
+            x = self.preprocessInput(x)
+        preds = self.model.get_preds(x)
+        return preds.cpu().numpy()
+
+    def predict(self, x: pd.Series, preprocess=True) -> Tuple[str, float]:
+        preds = self.getConfidenceScores(x, preprocess)
+        pred = preds.argmax()
+        conf = preds[pred]
+        label = self.label_encoder.inverse_transform(np.array([pred]))
+        return label[0], conf.item()
+
+    def evaluateTrain(self) -> float:
+        train_preds = self.model.get_preds(self.x_tr, normalize=False)
+        pred = train_preds.argmax(dim=1).cpu()
+        train_pred_labels = self.label_encoder.inverse_transform(np.array(pred))
+        y_train_labels = self.label_encoder.inverse_transform(np.array(self.y_train))
+        correct1 = sum(train_pred_labels == y_train_labels)
+        print(f"X_train acc1: {correct1 / len(self.y_train)}")
+        return correct1 / len(self.y_train)
+
+    def evaluateTest(self) -> float:
+        test_preds = self.model.get_preds(self.x_test, normalize=False)
+        pred = test_preds.argmax(dim=1).cpu()
+        test_pred_labels = self.label_encoder.inverse_transform(np.array(pred))
+        y_test_labels = self.label_encoder.inverse_transform(np.array(self.y_test))
+        correct1 = sum(test_pred_labels == y_test_labels)
+        print(f"X_test acc1: {correct1 / len(self.y_test)}")
+        return correct1 / len(self.y_test)
+
+
+class NN2LRArchPred(SKLearnClassifier):
+    NAME = "nn"
+
+    def __init__(
+        self,
+        df,
+        label=None,
+        verbose=True,
+        name=None,
+        rfe_num: int = 800,
+        solver: str = "lbfgs",
+        num_layers: int = 3,
+        hidden_layer_factor: float = 1,
+    ):
+        if name is None:
+            name = self.NAME
+        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False)
+        layer_sizes = [len(self.orig_cols)]
+        for i in range(num_layers - 1):
+            layer_sizes.append(layer_sizes[i] * hidden_layer_factor)
+        self.num_layers = num_layers
+        self.hidden_layer_factor = hidden_layer_factor
+        self.solver = solver
+        self.rfe_num = rfe_num
+        self.estimator = MLPClassifier(
+            hidden_layer_sizes=layer_sizes,
+            solver=solver,
+            # early_stopping=True,
+            #validation_fraction=0.2,
+        )
+        self.model = make_pipeline(StandardScaler(), self.estimator)
+        self.model.fit(self.x_tr, self.y_train)
+        if self.verbose:
+            self.evaluateTest
+
+    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
+        if preprocess:
+            x = self.preprocessInput(x)
+        return softmax(self.model.predict_proba(x)[0])
+
+
+class LRArchPred(RFEArchPred, SKLearnClassifier):
+    NAME = "lr"
+
+    def __init__(
+        self,
+        df,
+        label=None,
+        verbose=True,
+        rfe_num: int = None,
+        name=None,
+        multi_class: str = "auto",
+        penalty: str = "l2",
+    ) -> None:
+        if name is None:
+            name = self.NAME
+        super().__init__(df=df, name=name, label=label, verbose=verbose)
+        self.estimator = LogisticRegression(
+            multi_class=multi_class, penalty=penalty, max_iter=1000
+        )
+        self.rfe_num = rfe_num if rfe_num is not None else len(self.orig_cols)
+        self.rfe = RFE(
+            estimator=self.estimator,
+            n_features_to_select=self.rfe_num,
+            verbose=10 if self.verbose else 0,
+        )
+        if len(self.orig_cols) == 1:
+            self.model = make_pipeline(
+                StandardScaler(), MinMaxScaler(), self.estimator
+            )
+        else:
+            self.model = make_pipeline(
+                StandardScaler(), MinMaxScaler(), self.rfe, self.estimator
+            )
+        self.model.fit(self.x_tr, self.y_train)
+        if self.verbose:
+            self.printFeatures()
+            self.evaluateTest()
+
+
+class RFArchPred(RFEArchPred, SKLearnClassifier):
+    NAME = "rf"
+
+    def __init__(
+        self,
+        df,
+        label=None,
+        verbose=True,
+        rfe_num: int = None,
+        name=None,
+        num_estimators: int = 100,
+    ) -> None:
+        if name is None:
+            name = self.NAME
+        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False)
+        self.estimator = RandomForestClassifier(n_estimators=num_estimators)
+        self.num_estimators = num_estimators
+        self.rfe_num = rfe_num if rfe_num is not None else len(list(self.x_tr))
+        self.rfe = RFE(
+            estimator=self.estimator,
+            n_features_to_select=self.rfe_num,
+            verbose=10 if self.verbose else 0,
+        )
+        if len(self.orig_cols) == 1:
+            self.model = make_pipeline(
+                StandardScaler(), MinMaxScaler(), self.estimator
+            )
+        else:
+            self.model = make_pipeline(
+                StandardScaler(), MinMaxScaler(), self.rfe, self.estimator
+            )
+        self.model.fit(self.x_tr, self.y_train)
+        if self.verbose:
+            self.printFeatures()
+            self.evaluateTest()
+        
+    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
+        if preprocess:
+            x = self.preprocessInput(x)
+        preds = self.model.predict_proba(x)[0]
+        return softmax(preds)
+
+
+class KNNArchPred(SKLearnClassifier):
+    NAME = "knn"
+
+    def __init__(
+        self,
+        df,
+        label=None,
+        verbose=True,
+        name=None,
+        k: int = 5,
+        weights: str = "distance",
+    ) -> None:
+        if name is None:
+            name = self.NAME
+        super().__init__(df=df, name=name, label=label, verbose=verbose)
+        self.estimator = KNeighborsClassifier(n_neighbors=k, weights=weights)
+        self.k = k
+        self.weights = weights
+        self.model = make_pipeline(StandardScaler(), MinMaxScaler(), self.estimator)
+        self.model.fit(self.x_tr, self.y_train)
+        if self.verbose:
+            self.printFeatures()
+            self.evaluateTest()
+
+    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
+        if preprocess:
+            x = self.preprocessInput(x)
+        return softmax(self.model.predict_proba(x)[0])
+
+
+class CentroidArchPred(SKLearnClassifier):
+    NAME = "centroid"
+
+    def __init__(self, df, label=None, verbose=True, name=None) -> None:
+        if name is None:
+            name = self.NAME
+        super().__init__(df=df, name=name, label=label, verbose=verbose)
+        self.estimator = NearestCentroid()
+        self.model = make_pipeline(StandardScaler(), MinMaxScaler(), self.estimator)
+        self.model.fit(self.x_tr, self.y_train)
+        if self.verbose:
+            self.printFeatures()
+            self.evaluateTest()
+
+    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
+        if preprocess:
+            x = self.preprocessInput(x)
+        pred_class = self.model.predict(x)[0]
+        preds = [0] * self.num_classes
+        preds[pred_class] = 1
+        return preds
+
+
+class NBArchPred(SKLearnClassifier):
+    NAME = "nb"
+
+    def __init__(
+        self,
+        df,
+        label=None,
+        verbose=True,
+        name=None,
+    ) -> None:
+        if name is None:
+            name = self.NAME
+        super().__init__(df=df, name=name, label=label, verbose=verbose)
+        self.estimator = GaussianNB()
+        self.model = make_pipeline(StandardScaler(), MinMaxScaler(), self.estimator)
+        self.model.fit(self.x_tr, self.y_train)
+        if self.verbose:
+            self.printFeatures()
+            self.evaluateTest()
+
+    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
+        if preprocess:
+            x = self.preprocessInput(x)
+        return softmax(self.model.predict_proba(x)[0])
+
+
+class ABArchPred(RFEArchPred, SKLearnClassifier):
+    NAME = "ab"
+
+    def __init__(
+        self,
+        df,
+        label=None,
+        verbose=True,
+        rfe_num: int = None,
+        name=None,
+        num_estimators: int = 100,
+    ) -> None:
+        if name is None:
+            name = self.NAME
+        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False)
+        self.estimator = AdaBoostClassifier(n_estimators=num_estimators)
+        self.num_estimators = num_estimators
+        self.rfe_num = rfe_num if rfe_num is not None else len(list(self.x_tr))
+        self.rfe = RFE(
+            estimator=self.estimator,
+            n_features_to_select=self.rfe_num,
+            verbose=10 if self.verbose else 0,
+        )
+        if len(self.orig_cols) == 1:
+            self.model = make_pipeline(
+                StandardScaler(), MinMaxScaler(), self.estimator
+            )
+        else:
+            self.model = make_pipeline(
+                StandardScaler(), MinMaxScaler(), self.rfe, self.estimator
+            )
+        self.model.fit(self.x_tr, self.y_train)
+        if self.verbose:
+            self.printFeatures()
+            self.evaluateTest()
+        
+    def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
+        if preprocess:
+            x = self.preprocessInput(x)
+        preds = self.model.predict_proba(x)[0]
+        return softmax(preds)
+
+
+def get_arch_pred_model(
+    model_type, df=None, label=None, kwargs: dict = {}
+) -> ArchPredBase:
     if df is None:
         path = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe"
         df = all_data(path)
-    arch_model = {"nn": NNArchPred, "lr": LRArchPred, "lr_rfe": LRArchPredRFE}
+    arch_model = {
+        NNArchPred.NAME: NNArchPred,
+        LRArchPred.NAME: LRArchPred,
+        NN2LRArchPred.NAME: NN2LRArchPred,
+        KNNArchPred.NAME: KNNArchPred,
+        CentroidArchPred.NAME: CentroidArchPred,
+        NBArchPred.NAME: NBArchPred,
+        RFArchPred.NAME: RFArchPred,
+        ABArchPred.NAME: ABArchPred,
+    }
     return arch_model[model_type](df=df, label=label, **kwargs)
+
+def arch_model_names():
+    return [
+        #NNArchPred.NAME,
+        LRArchPred.NAME,
+        NN2LRArchPred.NAME,
+        KNNArchPred.NAME,
+        CentroidArchPred.NAME,
+        NBArchPred.NAME,
+        RFArchPred.NAME,
+        ABArchPred.NAME,
+    ]
 
 
 if __name__ == "__main__":

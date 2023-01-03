@@ -3,7 +3,7 @@ numpy
 pandas
 pyinstaller==4.9
 pyprof==0.0.7
-scikit_learn
+scikit_learn==1.1.3
 torch==1.12.1
 torchvision==0.13.1
 tornado

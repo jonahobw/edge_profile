@@ -1504,6 +1504,24 @@ def quantizeVictimModels(save: bool = True, prefix: str = None):
             QuantizedModelManager(victim_model_path=vict_path, save_model=save)
 
 
+def profileAllQuantizedModels(
+    gpu: int = 0,
+    prefix: str = None,
+    nvprof_args: dict = {},
+    count: int = 1,
+    add: bool = False,
+):
+    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
+        quant_path = vict_path.parent / QuantizedModelManager.FOLDER_NAME / QuantizedModelManager.MODEL_FILENAME
+        if quant_path.exists():
+            quant_manager = QuantizedModelManager.load(model_path=quant_path, gpu=gpu)
+            if quant_manager.isProfiled() and not add:
+                print(f"{quant_manager.model_name} is already profiled, skipping...")
+                continue
+            for i in range(count):
+                quant_manager.runNVProf(**nvprof_args)
+
+
 def pruneOneVictim(
     vict_path: Path,
     ratio: float = 0.5,
@@ -1537,6 +1555,26 @@ def pruneVictimModels(
             gpu=gpu,
             save=save,
         )
+
+
+def profileAllPrunedModels(
+    gpu: int = 0,
+    prefix: str = None,
+    nvprof_args: dict = {},
+    count: int = 1,
+    add: bool = False,
+):
+    """Pruned models must be trained already."""
+    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
+        prune_path = vict_path.parent / PruneModelManager.FOLDER_NAME / PruneModelManager.MODEL_FILENAME
+        if prune_path.exists():
+            prune_manager = PruneModelManager.load(model_path=prune_path, gpu=gpu)
+            assert prune_manager.config["epochs_trained"] > 0
+            if prune_manager.isProfiled() and not add:
+                print(f"{prune_manager.model_name} is already profiled, skipping...")
+                continue
+            for i in range(count):
+                prune_manager.runNVProf(**nvprof_args)
 
 
 def loadProfilesToFolder(
@@ -1602,6 +1640,7 @@ def predictVictimArchs(
     name: str = "predictions",
     save: bool = True,
     topk=5,
+    verbose: bool = True,
 ):
     """Iterates through the profiles in <folder> which was generated
     by loadProfilesToFolder(), the architecture of each, and storing
@@ -1661,12 +1700,14 @@ def predictVictimArchs(
     }
     predictions["family_accuracy"] = family_correct / total_tested
 
-    print(json.dumps(predictions, indent=4))
+    if verbose:
+        print(json.dumps(predictions, indent=4))
 
     if save:
         report_path = folder / f"{name}.json"
         with open(report_path, "w") as f:
             json.dump(predictions, f, indent=4)
+    return predictions
 
 
 if __name__ == "__main__":
@@ -1682,8 +1723,9 @@ if __name__ == "__main__":
     # manager = QuantizedModelManager(arch_path)
 
     # quantizeVictimModels()
-    pruneVictimModels(gpu=0)
+    # pruneVictimModels(gpu=0)
     # trainAllVictimModels(1, debug=2, reverse=True)
+    profileAllQuantizedModels()
     # profileAllVictimModels()
     # trainSurrogateModels(reverse=False, gpu=-1)
     # runTransferSurrogateModels(gpu=-1)

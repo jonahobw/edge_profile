@@ -14,6 +14,24 @@ from format_profiles import read_csv
 import config
 import json
 
+def subsample(df: pd.DataFrame, num: int, col: str = "model") -> pd.DataFrame:
+    """
+    Return a dataframe with the first <num> rows from each value in column <col>.
+    For example, if col="model" and num=10, then samples the first 10 profiles per model.
+    """
+    return df.groupby(col).head(num).reset_index(drop=True).copy(deep=True)
+
+
+def removeColumnsFromOther(keep_cols, remove_df):
+    """
+    Given two dataframes keep_cols and remove_df,
+    remove each column of remove_df if that column is
+    not in keep_cols.
+    """
+    to_remove = [x for x in remove_df.columns if x not in keep_cols.columns]
+    return remove_cols(remove_df, to_remove)
+
+
 def softmax(x):
     return(np.exp(x - np.max(x)) / np.exp(x - np.max(x)).sum())
 
