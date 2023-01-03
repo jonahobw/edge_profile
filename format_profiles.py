@@ -25,9 +25,11 @@ def check_profile(profile_csv):
             if line.startswith("=="):
                 equal_line_count += 1
                 if equal_line_count > 3:
+                    print(f"nvprof failed for profile {profile_csv}: 3 beginning lines start with ==")
                     return False  # check 2
             if i >= 5:
                 return True
+        print(f"nvprof failed for profile {profile_csv}, not enough lines in the file.")
     return False  # check 1
 
 
@@ -52,6 +54,9 @@ def check_for_nans(profile_csv, gpu=0) -> list[str]:
     null_system_cols = df.columns[df.isna().any()].tolist()
 
     null_cols.extend(null_system_cols)
+
+    if len(null_cols) > 0:
+        print(f"nvprof failed for profile {profile_csv}, null values in columns {null_cols}")
 
     return null_cols
 

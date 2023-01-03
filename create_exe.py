@@ -24,6 +24,8 @@ def createHiddenImportStr():
         "sklearn.neighbors._partition_nodes",
         "sklearn.utils._vector_sentinel",
         "sklearn.metrics.pairwise",
+        "sklearn.metrics._pairwise_distances_reduction._datasets_pair",
+        "sklearn.metrics._pairwise_distances_reduction",
         # "torch",
         # "torchvision",
         # "torch.jit",
