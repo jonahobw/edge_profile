@@ -51,6 +51,8 @@ def check_for_nans(profile_csv, gpu=0) -> list[str]:
     # system data
     skiprows = i + 2
     df = pd.read_csv(profile_csv, header=0, skiprows=skiprows, nrows=5 * (gpu + 1))
+    # filter out rows with '=='
+    df = df[df["Unnamed: 0"].str.contains("==") == False]
     null_system_cols = df.columns[df.isna().any()].tolist()
 
     null_cols.extend(null_system_cols)
