@@ -172,7 +172,7 @@ if __name__ == "__main__":
         with open(file, "r") as f:
             old_conf = json.load(f)
         for arg in old_conf:
-            if arg not in ["random_seed", "models"]:
+            if arg not in ["random_seed", "models", "i"]:
                 assert old_conf[arg] == save_args[arg]
     else:
         with open(file, "w") as f:

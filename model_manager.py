@@ -499,6 +499,7 @@ class ProfiledModelManager(ModelManagerBase):
             "input": input,
             "success": success,
             "gpu": self.gpu,
+            "gpu_type": torch.cuda.get_device_name(0),
         }
         with open(profile_folder / f"params_{profile_num}.json", "w") as f:
             json.dump(params, f, indent=4)
@@ -545,7 +546,7 @@ class ProfiledModelManager(ModelManagerBase):
                 conf = json.load(f)
             matched_filter = True
             for arg in filters:
-                if filters[arg] != conf[arg]:
+                if arg not in conf or filters[arg] != conf[arg]:
                     matched_filter = False
                     break
             if matched_filter:
@@ -601,7 +602,6 @@ class ProfiledModelManager(ModelManagerBase):
             the argument from the config file associated with a profile.
             to get a profile by name, can specify {"profile_number": "2181935"}
         """
-        # TODO add option to select profile by name
         assert self.isProfiled()
 
         profile_csv, config = self.getProfile(filters=filters)
@@ -1725,8 +1725,8 @@ if __name__ == "__main__":
     # quantizeVictimModels()
     # pruneVictimModels(gpu=0)
     # trainAllVictimModels(1, debug=2, reverse=True)
-    profileAllQuantizedModels()
-    # profileAllVictimModels()
+    # profileAllQuantizedModels()
+    profileAllVictimModels()
     # trainSurrogateModels(reverse=False, gpu=-1)
     # runTransferSurrogateModels(gpu=-1)
     # trainOneVictim("alexnet")

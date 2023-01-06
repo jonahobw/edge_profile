@@ -82,21 +82,21 @@ def filter_cols(df: pd.DataFrame, substrs: list, keep: list = None, verbose: boo
     return df.drop(remove_columns, axis=1)
 
 
-def get_csv(aggregated_csv_folder, remove_nans=True):
-    df = read_csv(aggregated_csv_folder)
+def get_csv(aggregated_csv_folder, remove_nans=True, gpu_activities_only=False, api_calls_only=False):
+    df = read_csv(aggregated_csv_folder, gpu_activities_only=gpu_activities_only, api_calls_only=api_calls_only)
     if remove_nans:
         df = remove_cols(df, "nan", verbose=True)
     return df
 
 
-def missing_data(aggregated_csv_folder):
+def missing_data(aggregated_csv_folder, gpu_activities_only=False, api_calls_only=False):
     """
     Returns the columns and number of missing datapoints by model.  Missing data are denoted by NaN.
 
     :param aggregated_csv_folder: path to the folder under ./profiles/ which contains the aggregated.csv file.
     :return: A dict keyed by model with the columns with missing data and the number of missing datapoints.
     """
-    df = get_csv(aggregated_csv_folder)
+    df = get_csv(aggregated_csv_folder, gpu_activities_only=gpu_activities_only, api_calls_only=api_calls_only)
     model_nans = {}
 
     for model in df["model"].unique():
@@ -109,7 +109,7 @@ def missing_data(aggregated_csv_folder):
     return model_nans
 
 
-def mutually_exclusive_data(aggregated_csv_folder):
+def mutually_exclusive_data(aggregated_csv_folder, gpu_activities_only=False, api_calls_only=False):
     """
     Returns information about the data as a dict with elements described below:
 
@@ -128,7 +128,7 @@ def mutually_exclusive_data(aggregated_csv_folder):
     :param aggregated_csv_folder: path to the folder under ./profiles/ which contains the aggregated.csv file.
     """
 
-    model_nans = missing_data(aggregated_csv_folder)
+    model_nans = missing_data(aggregated_csv_folder, gpu_activities_only=gpu_activities_only, api_calls_only=api_calls_only)
     num_models = len(list(model_nans.keys()))
 
     # dict of model: exclusive attributes to that model (this model has it completely and no other model has any)
@@ -185,7 +185,7 @@ def mutually_exclusive_data(aggregated_csv_folder):
     return res
 
 
-def shared_data(agg_csv_folder, system_data_only=False, no_system_data=False):
+def shared_data(agg_csv_folder, system_data_only=False, no_system_data=False, gpu_activities_only=False, api_calls_only=False):
     """
     Return a dataframe containing only complete features that can be used for machine learning.
 
@@ -198,7 +198,7 @@ def shared_data(agg_csv_folder, system_data_only=False, no_system_data=False):
         raise ValueError("system_data_only and no_system_data cannot both be true.")
 
     df = get_csv(agg_csv_folder)
-    complete_attributes = mutually_exclusive_data(agg_csv_folder)["complete_attributes"]
+    complete_attributes = mutually_exclusive_data(agg_csv_folder, gpu_activities_only=gpu_activities_only, api_calls_only=api_calls_only)["complete_attributes"]
     df = df[complete_attributes]    # only consider complete data
 
     if not system_data_only and not no_system_data:
@@ -348,7 +348,7 @@ def add_indicator_cols_to_input(df, x: pd.Series, exclude: list = []) -> pd.Seri
     return result
 
 
-def all_data(agg_csv_folder, system_data_only=False, no_system_data=False, indicators_only=False):
+def all_data(agg_csv_folder, system_data_only=False, no_system_data=False, indicators_only=False, gpu_activities_only=False, api_calls_only=False):
     """
     Return a dataframe containing all features.  Creates indicator columns for incomplete
     features, and fills NaNs with the mean of that feature.
@@ -362,7 +362,7 @@ def all_data(agg_csv_folder, system_data_only=False, no_system_data=False, indic
     if system_data_only and no_system_data:
         raise ValueError("system_data_only and no_system_data cannot both be true.")
 
-    df = get_csv(agg_csv_folder)
+    df = get_csv(agg_csv_folder, gpu_activities_only=gpu_activities_only, api_calls_only=api_calls_only)
 
     df = add_indicator_columns(df)
 

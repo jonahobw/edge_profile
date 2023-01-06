@@ -185,6 +185,7 @@ class SKLearnClassifier(ArchPredBase):
 
 class NNArchPred(ArchPredBase):
     NAME = "nn_old"
+    FULL_NAME = "Neural Network (PyTorch)"
 
     def __init__(
         self,
@@ -254,6 +255,7 @@ class NNArchPred(ArchPredBase):
 
 class NN2LRArchPred(SKLearnClassifier):
     NAME = "nn"
+    FULL_NAME = "Neural Network"
 
     def __init__(
         self,
@@ -295,6 +297,7 @@ class NN2LRArchPred(SKLearnClassifier):
 
 class LRArchPred(RFEArchPred, SKLearnClassifier):
     NAME = "lr"
+    FULL_NAME = "Logistic Regression"
 
     def __init__(
         self,
@@ -334,6 +337,7 @@ class LRArchPred(RFEArchPred, SKLearnClassifier):
 
 class RFArchPred(RFEArchPred, SKLearnClassifier):
     NAME = "rf"
+    FULL_NAME = "Random Forest"
 
     def __init__(
         self,
@@ -377,6 +381,7 @@ class RFArchPred(RFEArchPred, SKLearnClassifier):
 
 class KNNArchPred(SKLearnClassifier):
     NAME = "knn"
+    FULL_NAME = "K Nearest Neighbors"
 
     def __init__(
         self,
@@ -407,6 +412,7 @@ class KNNArchPred(SKLearnClassifier):
 
 class CentroidArchPred(SKLearnClassifier):
     NAME = "centroid"
+    FULL_NAME = "Nearest Centroid"
 
     def __init__(self, df, label=None, verbose=True, name=None) -> None:
         if name is None:
@@ -430,6 +436,7 @@ class CentroidArchPred(SKLearnClassifier):
 
 class NBArchPred(SKLearnClassifier):
     NAME = "nb"
+    FULL_NAME = "Naive Bayes"
 
     def __init__(
         self,
@@ -456,6 +463,7 @@ class NBArchPred(SKLearnClassifier):
 
 class ABArchPred(RFEArchPred, SKLearnClassifier):
     NAME = "ab"
+    FULL_NAME = "AdaBoost"
 
     def __init__(
         self,
@@ -526,6 +534,18 @@ def arch_model_names():
         RFArchPred.NAME,
         ABArchPred.NAME,
     ]
+
+def arch_model_full_name():
+    return {
+        #NNArchPred.NAME: NNArchPred.FULL_NAME,
+        LRArchPred.NAME: LRArchPred.FULL_NAME,
+        NN2LRArchPred.NAME: NN2LRArchPred.FULL_NAME,
+        KNNArchPred.NAME: KNNArchPred.FULL_NAME,
+        CentroidArchPred.NAME: CentroidArchPred.FULL_NAME,
+        NBArchPred.NAME: NBArchPred.FULL_NAME,
+        RFArchPred.NAME: RFArchPred.FULL_NAME,
+        ABArchPred.NAME: ABArchPred.FULL_NAME,
+    }
 
 
 if __name__ == "__main__":
