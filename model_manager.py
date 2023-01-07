@@ -499,7 +499,7 @@ class ProfiledModelManager(ModelManagerBase):
             "input": input,
             "success": success,
             "gpu": self.gpu,
-            "gpu_type": torch.cuda.get_device_name(0),
+            "gpu_type": torch.cuda.get_device_name(0).lower().replace(" ", "_"),
         }
         with open(profile_folder / f"params_{profile_num}.json", "w") as f:
             json.dump(params, f, indent=4)
