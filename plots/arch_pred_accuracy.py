@@ -230,10 +230,13 @@ def plotFromReport(
     plt.legend()
     plt.rcParams["figure.figsize"] = (10, 10)
     plt.xlabel("Number of Features")
-    interval = 1 + (max(x_axis) // 10)
-    ticks = [x for x in range(0, max(x_axis), interval)]
+
+    x_axis_lim = max(x_axis) if xlim_upper is None else xlim_upper
+
+    interval = 1 + (x_axis_lim // 10)
+    ticks = [x for x in range(0, x_axis_lim, interval)]
     ticks[0] = 1
-    ticks.append(max(x_axis))
+    ticks.append(x_axis_lim)
     plt.xticks(ticks)
     dataset_name_map = {
         "val": "Validation",
@@ -280,7 +283,7 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------------------
     
     load_report = (
-        False  # if true, load report from file, if false, generate report and save
+        True  # if true, load report from file, if false, generate report and save
     )
 
     # parameters for generating a report, for loading a report, only the first variable
@@ -291,17 +294,17 @@ if __name__ == "__main__":
     folder = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe_pretrained"
     model_names = arch_model_names()  # all the models we want to use
     # model_names = ["lr", "knn", "centroid", "nb"]
-    num_experiments = 1
+    num_experiments = 10
     x_axis = [i for i in range(1, 51)]
     x_axis.extend([i for i in range(60, 200, 10)])
 
     # ------------------------------------------------------------------------------
 
     # plotting
-    plot = False    # whether or not to plot
+    plot = True    # whether or not to plot
     plot_model_names = model_names
     plot_datasets = ['test'] #['val', 'train', 'test']
-    xlim_upper = None
+    xlim_upper = 25
     plot_save_name = f"{report_name}_{plot_datasets[-1]}"
 
     # ------------------------------------------------------------------------------

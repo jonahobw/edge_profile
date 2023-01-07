@@ -761,10 +761,10 @@ class VictimModelManager(ProfiledModelManager):
             prefix = "models"
 
         models_folder = Path.cwd() / prefix
-        arch_folders = [i for i in models_folder.glob("*")]
+        arch_folders = [i for i in models_folder.glob("*") if i.is_dir()]
         model_paths = []
         for arch in arch_folders:
-            for model_folder in [i for i in arch.glob("*")]:
+            for model_folder in [i for i in arch.glob("*")if i.is_dir()]:
                 victim_path = (
                     models_folder
                     / arch
@@ -1634,6 +1634,55 @@ def loadProfilesToFolder(
         json.dump(all_config, f, indent=4)
 
 
+def loadPrunedProfilesToFolder(
+    prefix: str = "models", folder_name: str = "victim_profiles_pruned", replace: bool = False, filters: dict=None, all: bool = True
+):
+    """
+    Same as loadPrunedProfilesToFolder, but for pruned models
+    """
+    config_name = "config.json"
+    all_config = {}
+
+    folder = Path.cwd() / folder_name
+    if folder.exists():
+        if not replace:
+            print(
+                f"loadProfilesToFolder: folder already exists and replace is false, returning"
+            )
+            return
+            # raise FileExistsError
+        shutil.rmtree(folder)
+    folder.mkdir(exist_ok=True, parents=True)
+
+    file_count = 0
+
+    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
+        prune_path = vict_path.parent / PruneModelManager.FOLDER_NAME / PruneModelManager.MODEL_FILENAME
+        if prune_path.exists():
+            manager = PruneModelManager.load(model_path=prune_path)
+            assert manager.config["epochs_trained"] > 0
+    
+            profiles = manager.getAllProfiles(filters=filters)
+            if not all:
+                profiles = [manager.getProfile(filters=filters)]
+            for profile_path, config in profiles:
+                config["model"] = manager.architecture
+                config["model_path"] = str(manager.path)
+                config["manager_name"] = manager.model_name
+                config["model_family"] = name_to_family[manager.architecture]
+                new_name = f"profile_{manager.architecture}_{file_count}.csv"
+                new_path = folder / new_name
+                shutil.copy(profile_path, new_path)
+                file_count += 1
+                all_config[str(new_name)] = config
+                print(f"\tSaved Profile {profile_path.name} to {new_path}")
+
+    # save config file
+    config_path = folder / config_name
+    with open(config_path, "w") as f:
+        json.dump(all_config, f, indent=4)
+
+
 def predictVictimArchs(
     model: ArchPredBase,
     folder: Path,
@@ -1717,6 +1766,7 @@ if __name__ == "__main__":
     if not ans.lower() == "yes":
         exit(0)
     
+    profileAllPrunedModels()
     # arch = "alexnet"
     # vict_paths = VictimModelManager.getModelPaths()
     # arch_path = [x for x in vict_paths if x.find(arch) >= 0][0]
@@ -1726,7 +1776,7 @@ if __name__ == "__main__":
     # pruneVictimModels(gpu=0)
     # trainAllVictimModels(1, debug=2, reverse=True)
     # profileAllQuantizedModels()
-    profileAllVictimModels()
+    # profileAllVictimModels()
     # trainSurrogateModels(reverse=False, gpu=-1)
     # runTransferSurrogateModels(gpu=-1)
     # trainOneVictim("alexnet")
@@ -1750,6 +1800,7 @@ if __name__ == "__main__":
 
     # surrogate_manager.transferAttackPGD(eps=8/255, step_size=2/255, iterations=10, debug=1)
     # loadProfilesToFolder(all=False, replace=True)
+    # loadProfilesToFolder(folder_name="victim_profiles_tesla", filters={"gpu_type": "tesla_t4"}, all=False)
     # predictVictimArchs()
     # trainSurrogateModels(predict=False)
     exit(0)

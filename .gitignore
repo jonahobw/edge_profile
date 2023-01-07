@@ -13,11 +13,13 @@ models_backup/
 email_pw.txt
 *ranking.txt
 victim_profiles/
+victim_profiles_tesla/
 *.png
 plots/reports
 plots/arch_pred_acc_by_data_subset
 plots/feature_ranks
 plots/arch_pred_acc_by_dataset_size
+plots/cross_gpu_acc
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -45,6 +45,7 @@ from utils import latest_file
 
 PROFILE_FOLDER = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe_pretrained"
 SAVE_FOLDER = Path(__file__).parent.absolute() / "arch_pred_acc_by_data_subset"
+QUADRO_VICT_PROFILE_FOLDER = Path.cwd() / "victim_profiles"
 
 def loadReport(filename: str):
     report_path = Path(__file__).parent.absolute() / filename
@@ -53,7 +54,7 @@ def loadReport(filename: str):
     return report
 
 
-def generateTable(data_subsets: Dict[str, pd.DataFrame], model_names: List[str] = None, topk=[1, 5], save_name: str = None):
+def generateTable(data_subsets: Dict[str, pd.DataFrame], victim_profile_folder: Path, model_names: List[str] = None, topk=[1], save_name: str = None):
 
     if save_name is None:
         save_name = "arch_pred_acc_by_data_subset.csv"
@@ -64,12 +65,15 @@ def generateTable(data_subsets: Dict[str, pd.DataFrame], model_names: List[str] 
 
     columns = ["Architecture Prediction Model Type"]
     
+    num_columns = {}
     
     for data_subset in data_subsets:
+        num_columns[data_subset] = len(list(data_subsets[data_subset].columns)) - 3
         for k in topk:
-            columns.append(f"{data_subset} Top {k}")    # redundancy is for formatting
-            columns.append(f"{data_subset} Top {k} Train")
-            columns.append(f"{data_subset} Top {k} Val")
+            columns.append(f"{data_subset} ({num_columns[data_subset]}) Top {k}")    # redundancy is for formatting
+            columns.append(f"{data_subset} ({num_columns[data_subset]}) Top {k} Train")
+            columns.append(f"{data_subset} ({num_columns[data_subset]}) Top {k} Val")
+            columns.append(f"{data_subset} ({num_columns[data_subset]}) Top {k} Test")
 
     table = pd.DataFrame(columns=columns)
 
@@ -84,26 +88,31 @@ def generateTable(data_subsets: Dict[str, pd.DataFrame], model_names: List[str] 
                     model_pred_fn = model.model.decision_function
                 elif hasattr(model.model, "predict_proba"):
                     model_pred_fn = model.model.predict_proba
+                
+                test = predictVictimArchs(model, victim_profile_folder, save=False, topk=1, verbose=False)["accuracy_k"][1]
 
                 if model_pred_fn is not None:
                     train = top_k_accuracy_score(model.y_train, model_pred_fn(model.x_tr), k=k)
-                    test = top_k_accuracy_score(model.y_test, model_pred_fn(model.x_test), k=k)
+                    val = top_k_accuracy_score(model.y_test, model_pred_fn(model.x_test), k=k)
                 else:
                     train = np.nan
-                    test = np.nan
+                    val = np.nan
                     if k == 1:
                         train = model.evaluateTrain()
-                        test = model.evaluateTest()
+                        val = model.evaluateTest()
 
-                row_data[f"{data_subset} Top {k}"] = "{:.3g}/{:.3g}".format(train * 100, test * 100)
-                row_data[f"{data_subset} Top {k} Train"] = train * 100
-                row_data[f"{data_subset} Top {k} Val"] = test * 100
+                row_data[f"{data_subset} ({num_columns[data_subset]}) Top {k}"] = "{:.3g}/{:.3g}".format(train * 100, val * 100)
+                row_data[f"{data_subset} ({num_columns[data_subset]}) Top {k} Train"] = train * 100
+                row_data[f"{data_subset} ({num_columns[data_subset]}) Top {k} Val"] = val * 100
+                row_data[f"{data_subset} ({num_columns[data_subset]}) Top {k} Test"] = test * 100
 
         table = table.append(row_data, ignore_index=True)
     
     table.to_csv(save_path)
     transpose_path = SAVE_FOLDER / f"{save_path.name[:-4]}_transpose.csv"
     table.T.to_csv(transpose_path)
+
+    printNumFeatures(data_subsets)
 
 
 def semanticSubsets():
@@ -134,16 +143,22 @@ def topFeatureSubsets(feature_rank_model: str = "lr", num_features = [5]):
 def createTable():
     subsets = semanticSubsets()
     subsets.update(topFeatureSubsets())
-    generateTable(subsets)
-    return subsets
+    generateTable(subsets, victim_profile_folder=QUADRO_VICT_PROFILE_FOLDER)
 
 def printNumFeatures(subsets):
     for subset in subsets:
         print(f"{subset.ljust(30)}: {len(list(subsets[subset].columns)) - 3} features")
 
+def small():
+    # use for small experiments
+    subsets = semanticSubsets()
+    subsets =  {"GPU Kernel, No Memory": subsets["GPU Kernel, No Memory"]}
+
+    generateTable(subsets, victim_profile_folder=QUADRO_VICT_PROFILE_FOLDER, save_name="gpu_nomem.csv")
+
 if __name__ == '__main__':
-    printNumFeatures(createTable())
-    
+    #createTable()
+    small()
     exit(0)
 
     
