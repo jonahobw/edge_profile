@@ -227,13 +227,12 @@ def plotFromReport(
                 alpha=0.2,
             )
 
-    plt.legend()
     plt.rcParams["figure.figsize"] = (10, 10)
-    plt.xlabel("Number of Features")
+    plt.xlabel("Number of Features to Train Architecture Prediction Model")
 
     x_axis_lim = max(x_axis) if xlim_upper is None else xlim_upper
 
-    interval = 1 + (x_axis_lim // 10)
+    interval = (x_axis_lim // 10)
     ticks = [x for x in range(0, x_axis_lim, interval)]
     ticks[0] = 1
     ticks.append(x_axis_lim)
@@ -251,7 +250,9 @@ def plotFromReport(
         f"Architecture Prediction Accuracy on {datasets_str[:-1]} Data\nby Number of Features"
     )
     if xlim_upper is not None:
-        plt.xlim(right=xlim_upper)
+        plt.xlim(left=0, right=xlim_upper)
+    
+    plt.legend(loc=(0.75, 0.45))
     
     if not save_name.endswith(".png"):
         save_name += ".png"
@@ -303,8 +304,8 @@ if __name__ == "__main__":
     # plotting
     plot = True    # whether or not to plot
     plot_model_names = model_names
-    plot_datasets = ['test'] #['val', 'train', 'test']
-    xlim_upper = 25
+    plot_datasets = ['val'] #['val', 'train', 'test']
+    xlim_upper = 30
     plot_save_name = f"{report_name}_{plot_datasets[-1]}"
 
     # ------------------------------------------------------------------------------

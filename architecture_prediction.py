@@ -33,7 +33,7 @@ from config import SYSTEM_SIGNALS
 
 
 class ArchPredBase(ABC):
-    def __init__(self, df, name: str, label=None, verbose=True, deterministic=True) -> None:
+    def __init__(self, df, name: str, label=None, verbose=True, deterministic=True, train_size=None, test_size=None) -> None:
         if label is None:
             label = "model"
         self.verbose = verbose
@@ -45,7 +45,7 @@ class ArchPredBase(ABC):
         self.orig_cols = list(all_x.columns)
         all_y_labeled = self.label_encoder.fit_transform(all_y)
         x_tr, x_test, y_train, y_test = train_test_split(
-            all_x, all_y_labeled, random_state=42
+            all_x, all_y_labeled, random_state=42, stratify=all_y_labeled, train_size=train_size, test_size=test_size
         )
         self.x_tr = x_tr
         self.x_test = x_test
@@ -196,10 +196,12 @@ class NNArchPred(ArchPredBase):
         num_layers=None,
         name=None,
         epochs: int = 100,
+        train_size=None,
+        test_size=None,
     ):
         if name is None:
             name = self.NAME
-        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False)
+        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False, train_size=train_size, test_size=test_size)
         print(
             f"Instantiating neural net with {self.num_classes} classes and input size of {self.input_size}"
         )
@@ -267,10 +269,12 @@ class NN2LRArchPred(SKLearnClassifier):
         solver: str = "lbfgs",
         num_layers: int = 3,
         hidden_layer_factor: float = 1,
+        train_size=None,
+        test_size=None,
     ):
         if name is None:
             name = self.NAME
-        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False)
+        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False, train_size=train_size, test_size=test_size)
         layer_sizes = [len(self.orig_cols)]
         for i in range(num_layers - 1):
             layer_sizes.append(layer_sizes[i] * hidden_layer_factor)
@@ -308,10 +312,12 @@ class LRArchPred(RFEArchPred, SKLearnClassifier):
         name=None,
         multi_class: str = "auto",
         penalty: str = "l2",
+        train_size=None,
+        test_size=None
     ) -> None:
         if name is None:
             name = self.NAME
-        super().__init__(df=df, name=name, label=label, verbose=verbose)
+        super().__init__(df=df, name=name, label=label, verbose=verbose, train_size=train_size, test_size=test_size)
         self.estimator = LogisticRegression(
             multi_class=multi_class, penalty=penalty, max_iter=1000
         )
@@ -347,10 +353,12 @@ class RFArchPred(RFEArchPred, SKLearnClassifier):
         rfe_num: int = None,
         name=None,
         num_estimators: int = 100,
+        train_size=None,
+        test_size=None,
     ) -> None:
         if name is None:
             name = self.NAME
-        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False)
+        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False, train_size=train_size, test_size=test_size)
         self.estimator = RandomForestClassifier(n_estimators=num_estimators)
         self.num_estimators = num_estimators
         self.rfe_num = rfe_num if rfe_num is not None else len(list(self.x_tr))
@@ -391,10 +399,12 @@ class KNNArchPred(SKLearnClassifier):
         name=None,
         k: int = 5,
         weights: str = "distance",
+        train_size=None,
+        test_size=None,
     ) -> None:
         if name is None:
             name = self.NAME
-        super().__init__(df=df, name=name, label=label, verbose=verbose)
+        super().__init__(df=df, name=name, label=label, verbose=verbose, train_size=train_size, test_size=test_size)
         self.estimator = KNeighborsClassifier(n_neighbors=k, weights=weights)
         self.k = k
         self.weights = weights
@@ -414,10 +424,10 @@ class CentroidArchPred(SKLearnClassifier):
     NAME = "centroid"
     FULL_NAME = "Nearest Centroid"
 
-    def __init__(self, df, label=None, verbose=True, name=None) -> None:
+    def __init__(self, df, label=None, verbose=True, name=None, train_size=None, test_size=None) -> None:
         if name is None:
             name = self.NAME
-        super().__init__(df=df, name=name, label=label, verbose=verbose)
+        super().__init__(df=df, name=name, label=label, verbose=verbose, train_size=train_size, test_size=test_size)
         self.estimator = NearestCentroid()
         self.model = make_pipeline(StandardScaler(), MinMaxScaler(), self.estimator)
         self.model.fit(self.x_tr, self.y_train)
@@ -444,10 +454,12 @@ class NBArchPred(SKLearnClassifier):
         label=None,
         verbose=True,
         name=None,
+        train_size=None,
+        test_size=None,
     ) -> None:
         if name is None:
             name = self.NAME
-        super().__init__(df=df, name=name, label=label, verbose=verbose)
+        super().__init__(df=df, name=name, label=label, verbose=verbose, train_size=train_size, test_size=test_size)
         self.estimator = GaussianNB()
         self.model = make_pipeline(StandardScaler(), MinMaxScaler(), self.estimator)
         self.model.fit(self.x_tr, self.y_train)
@@ -473,10 +485,12 @@ class ABArchPred(RFEArchPred, SKLearnClassifier):
         rfe_num: int = None,
         name=None,
         num_estimators: int = 100,
+        train_size=None,
+        test_size=None,
     ) -> None:
         if name is None:
             name = self.NAME
-        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False)
+        super().__init__(df=df, name=name, label=label, verbose=verbose, deterministic=False, train_size=train_size, test_size=test_size)
         self.estimator = AdaBoostClassifier(n_estimators=num_estimators)
         self.num_estimators = num_estimators
         self.rfe_num = rfe_num if rfe_num is not None else len(list(self.x_tr))

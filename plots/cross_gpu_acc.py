@@ -30,7 +30,6 @@ from data_engineering import (
     filter_cols,
     all_data,
     remove_cols,
-    subsample,
     removeColumnsFromOther,
 )
 from architecture_prediction import (
@@ -77,7 +76,7 @@ def getTestAcc(model: ArchPredBase, gpu_type: str, verbose: bool = False):
         manager = VictimModelManager.load(vict_path)
         
 
-def generateCrossGPUReport(quadro_train: pd.DataFrame, tesla_train: pd.DataFrame, config: dict, model_names: List[str], topk: List[int] = [1, 5]):
+def generateCrossGPUReport(quadro_train: pd.DataFrame, tesla_train: pd.DataFrame, config: dict, model_names: List[str], topk: List[int] = [1, 5], train_size: int = None):
     #TODO do we want number of experiments as measure of centrality?
     columns = ["Architecture Prediction Model Type", "Train Quadro RTX 8000, Test Tesla", "Train Quadro RTX 8000, Test Tesla Family", "Train Tesla, Test Quadro RTX 8000", "Train Tesla, Test Quadro RTX 8000 Family"]
 
@@ -90,7 +89,7 @@ def generateCrossGPUReport(quadro_train: pd.DataFrame, tesla_train: pd.DataFrame
     for model_type in model_names:
         row_data = {"Architecture Prediction Model Type": arch_model_full_name()[model_type]}
         # train on quadro
-        model = get_arch_pred_model(model_type=model_type, df=quadro_train)
+        model = get_arch_pred_model(model_type=model_type, df=quadro_train, kwargs={"train_size": train_size})
 
         # test on tesla
         k_acc_report = predictVictimArchs(model, TESLA_TEST, save=False, topk=max(topk), verbose=False)
@@ -106,7 +105,7 @@ def generateCrossGPUReport(quadro_train: pd.DataFrame, tesla_train: pd.DataFrame
         row_data["Train Quadro RTX 8000, Test Tesla"] = topk_str[:-1]
 
         #train on tesla
-        model = get_arch_pred_model(model_type=model_type, df=tesla_train)
+        model = get_arch_pred_model(model_type=model_type, df=tesla_train, kwargs={"train_size": train_size})
 
         # test on quadro
         k_acc_report = predictVictimArchs(model, QUADRO_TEST, save=False, topk=max(topk), verbose=False)
@@ -180,8 +179,8 @@ if __name__ == '__main__':
     topk = [1, 5]
 
     # if not None, can be an int representing how many profiles to
-    # keep per architecture note that this is for the entire train + val dataset
-    subsample_df = None
+    # keep per architecture in the training data
+    train_size = None
 
     # if None, use all features. Else, this is a name of a feature ranking under
     # feature_ranks/
@@ -204,10 +203,6 @@ if __name__ == '__main__':
     quadro_train = getDF(QUADRO_TRAIN, df_args=df_args)
     tesla_train = getDF(TESLA_TRAIN, df_args=df_args)
     
-    if subsample_df is not None:
-        quadro_train = subsample(quadro_train, subsample_df)
-        tesla_train = subsample(tesla_train, subsample_df)
-    
     if feature_ranking_file is not None:
         feature_ranking = loadFeatureRank(feature_ranking_file)
         relevant_features = feature_ranking[:feature_num]
@@ -219,7 +214,7 @@ if __name__ == '__main__':
     tesla_train = remove_cols(tesla_train, df_remove_substrs)
     
     config = {
-        "subsample_df": subsample_df,
+        "train_size": train_size,
         "feature_ranking_file": feature_ranking_file,
         "feature_num": feature_num,
         "df_args": df_args,
@@ -227,7 +222,7 @@ if __name__ == '__main__':
         "model_names": model_names,
     }
 
-    generateCrossGPUReport(quadro_train=quadro_train, tesla_train=tesla_train, config=config, model_names=model_names, topk=topk)
+    generateCrossGPUReport(quadro_train=quadro_train, tesla_train=tesla_train, config=config, model_names=model_names, topk=topk, train_size=train_size)
 
 
     

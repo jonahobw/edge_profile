@@ -48,7 +48,7 @@ SAVE_FOLDER = Path(__file__).parent.absolute() / "arch_pred_acc_by_data_subset"
 QUADRO_VICT_PROFILE_FOLDER = Path.cwd() / "victim_profiles"
 
 def loadReport(filename: str):
-    report_path = Path(__file__).parent.absolute() / filename
+    report_path = Path(__file__).parent.absolute() / "feature_ranks" / filename
     with open(report_path, "r") as f:
         report = json.load(f)
     return report
@@ -130,8 +130,8 @@ def semanticSubsets():
     return data_subsets
 
 
-def topFeatureSubsets(feature_rank_model: str = "lr", num_features = [5]):
-    feature_rank = loadReport(f"feature_rank_{feature_rank_model}.json")["feature_rank"]
+def topFeatureSubsets(feature_rank_file, num_features = [5]):
+    feature_rank = loadReport(feature_rank_file)["feature_rank"]
 
     data_subsets = {}
     for feature_count in num_features:
@@ -142,7 +142,7 @@ def topFeatureSubsets(feature_rank_model: str = "lr", num_features = [5]):
 
 def createTable():
     subsets = semanticSubsets()
-    subsets.update(topFeatureSubsets())
+    subsets.update(topFeatureSubsets(feature_rank_file="feature_rank_lr.json"))
     generateTable(subsets, victim_profile_folder=QUADRO_VICT_PROFILE_FOLDER)
 
 def printNumFeatures(subsets):
@@ -156,9 +156,14 @@ def small():
 
     generateTable(subsets, victim_profile_folder=QUADRO_VICT_PROFILE_FOLDER, save_name="gpu_nomem.csv")
 
+def best_rf_gpu_nomem():
+    subsets = topFeatureSubsets(feature_rank_file="rf_gpu_kernels_nomem.json", num_features=[3, 25, 1000])
+    generateTable(subsets, victim_profile_folder=QUADRO_VICT_PROFILE_FOLDER, save_name="rf_gpu_nomem_rank.csv")
+
 if __name__ == '__main__':
     #createTable()
-    small()
+    # small()
+    best_rf_gpu_nomem()
     exit(0)
 
     
