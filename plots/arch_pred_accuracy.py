@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 import sys
 import matplotlib.pyplot as plt
+from matplotlib import rc
 
 # plt.style.use('ggplot')
 
@@ -38,6 +39,9 @@ from architecture_prediction import (
 from model_manager import predictVictimArchs
 from config import SYSTEM_SIGNALS
 from utils import latest_file
+
+rc('font',**{'family':'serif','serif':['Times'], 'size': 14})
+rc('figure', **{'figsize': (5, 4)})
 
 
 def getDF(path: Path = None, to_keep_path: Path = None, save_path: Path = None, gpu_activities_only=False):
@@ -227,7 +231,8 @@ def plotFromReport(
                 alpha=0.2,
             )
 
-    plt.rcParams["figure.figsize"] = (10, 10)
+    #plt.rcParams["figure.figsize"] = (3, 3)
+    plt.tight_layout()
     plt.xlabel("Number of Features to Train Architecture Prediction Model")
 
     x_axis_lim = max(x_axis) if xlim_upper is None else xlim_upper
@@ -252,12 +257,12 @@ def plotFromReport(
     if xlim_upper is not None:
         plt.xlim(left=0, right=xlim_upper)
     
-    plt.legend(loc=(0.75, 0.45))
+    plt.legend(loc=(0.68, 0.23))
     
     if not save_name.endswith(".png"):
         save_name += ".png"
     
-    plt.savefig(Path(__file__).parent / "arch_pred_acc" / save_name, dpi = 300)
+    plt.savefig(Path(__file__).parent / "arch_pred_acc" / save_name, dpi=500, bbox_inches="tight")
 
 
 if __name__ == "__main__":

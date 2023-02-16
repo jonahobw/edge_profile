@@ -11,6 +11,7 @@ import numpy as np
 
 import sys
 import matplotlib.pyplot as plt
+from matplotlib import rc
 
 # plt.style.use('ggplot')
 
@@ -27,6 +28,9 @@ from architecture_prediction import (
 from model_manager import predictVictimArchs
 from config import SYSTEM_SIGNALS
 from arch_pred_accuracy import getDF
+
+rc('font',**{'family':'serif','serif':['Times'], 'size': 14})
+rc('figure', **{'figsize': (5, 4)})
 
 REPORT_FOLDER = Path(__file__).parent.absolute() / "arch_pred_acc_by_dataset_size"
 REPORT_FOLDER.mkdir(exist_ok=True)
@@ -162,13 +166,14 @@ def plotFromReport(
                 plus_std,
                 alpha=0.2,
             )
-    plt.rcParams["figure.figsize"] = (10, 10)
-    plt.legend()
+    #plt.rcParams["figure.figsize"] = (10, 10)
+    plt.tight_layout()
+    plt.legend(loc="lower right")
     plt.xlabel("Number of Profiles per Architecture in Training Dataset")
 
     x_axis_lim = max(x_axis) if xlim_upper is None else xlim_upper
 
-    interval = (x_axis_lim // 10)
+    interval = (x_axis_lim // 7)
     ticks = [x for x in range(0, x_axis_lim, interval)]
     ticks[0] = 1
     ticks.append(x_axis_lim)
@@ -188,7 +193,7 @@ def plotFromReport(
     )
     if xlim_upper is not None:
         plt.xlim(right=xlim_upper)
-    plt.savefig(REPORT_FOLDER / "plots" / save_name, dpi = 300)
+    plt.savefig(REPORT_FOLDER / "plots" / save_name, dpi=500, bbox_inches="tight")
 
 
 if __name__ == "__main__":
