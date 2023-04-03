@@ -23,6 +23,8 @@ plots/arch_pred_acc_by_dataset_size
 plots/cross_gpu_acc
 plots/prune_pred_acc
 plots/top_n_features
+onnx_models/
+plots/theoretical_dummy/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
