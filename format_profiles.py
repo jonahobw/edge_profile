@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from get_model import name_to_family
+import argparse
 
 
 def check_profile(profile_csv):
@@ -572,6 +573,8 @@ if __name__ == "__main__":
     # parse_all_profiles("zero_noexe_lots_models")
     # validate_nvprof("zero_noexe_lots_models")
     # validate_class_balance("zero_noexe_lots_models")
-    path = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe"
-    validate_all(path)
+    a = argparse.ArgumentParser()
+    a.add_argument("-folder", type=str, required=True, help="folder with profiles")
+    a.parse_args()
+    read_csv(a.folder)
     exit(0)

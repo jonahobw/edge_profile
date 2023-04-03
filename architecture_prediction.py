@@ -17,7 +17,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler, Normalizer
 from sklearn.feature_selection import RFE
-from sklearn.metrics import f1_score
+from sklearn.metrics import top_k_accuracy_score
 import pandas as pd
 
 from data_engineering import (
@@ -117,6 +117,24 @@ class ArchPredBase(ABC):
         acc = self.model.score(self.x_test, self.y_test)
         print(f"{self.name} test acc: {acc}")
         return acc
+    
+    def evaluateAcc(self, data: pd.DataFrame, y_label: str = "model") -> float:
+        # data columns must match training data columns
+        y = self.label_encoder.transform(data[y_label])
+        x = data.drop(columns=["file", "model_family", "model"], axis=1)
+        return self.model.score(x, y)
+
+
+    # def evaluateTopKNumpy(self, k: int, train=True):
+    #     x = self.x_tr
+    #     y = self.y_train
+    #     if not train:
+    #         x = self.x_test
+    #         y = self.y_test
+    #     results = []
+    #     for i in range(1, k+1):
+    #         results.append(top_k_accuracy_score(y, self.get))
+        
 
 
 class RFEArchPred(ArchPredBase):
