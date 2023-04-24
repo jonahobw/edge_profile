@@ -65,13 +65,13 @@ def dataset_path(dataset, path=None):
         ValueError -- If no path is provided and DATAPATH is not set
         LookupError -- If the given dataset cannot be found
     """
-    p = pathlib.Path.cwd() / "datasets" / dataset
+    p = Path.cwd() / "datasets" / dataset
 
     if p.exists():
         return p
     print(f"Path does not exist:\n{p}\n")
 
-    paths = [pathlib.Path(p) for p in path.split(":")]
+    paths = [Path(p) for p in path.split(":")]
 
     for p in paths:
         p = (p / dataset).resolve()
