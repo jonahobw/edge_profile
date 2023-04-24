@@ -25,6 +25,7 @@ plots/prune_pred_acc
 plots/top_n_features
 onnx_models/
 plots/theoretical_dummy/
+knockoff/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

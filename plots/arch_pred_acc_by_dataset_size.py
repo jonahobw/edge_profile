@@ -143,6 +143,7 @@ def plotFromReport(
     datasets: List[str] = None,
     xlim_upper: int = None,
     save_name: str = None,
+    title: bool = True,
 ):
     if save_name is None:
         save_name = "arch_pred_acc_by_dataset_size.png"
@@ -188,9 +189,10 @@ def plotFromReport(
     datasets_str = ""
     for ds in datasets:
         datasets_str += f"{dataset_name_map[ds]}/"
-    plt.title(
-        f"Architecture Prediction Accuracy on {datasets_str[:-1]} Data\nby Number of Profiles per Architecture in Train Dataset"
-    )
+    if title:
+        plt.title(
+            f"Architecture Prediction Accuracy on {datasets_str[:-1]} Data\nby Number of Profiles per Architecture in Train Dataset"
+        )
     if xlim_upper is not None:
         plt.xlim(right=xlim_upper)
     plt.savefig(REPORT_FOLDER / "plots" / save_name, dpi=500, bbox_inches="tight")
@@ -223,6 +225,7 @@ if __name__ == "__main__":
     plot_model_names = model_names
     plot_datasets = ['test'] #['val', 'train', 'test']
     xlim_upper = None
+    title=False
 
     # ---------------------------------------------------------------------
 
@@ -255,4 +258,5 @@ if __name__ == "__main__":
             datasets=plot_datasets,
             xlim_upper=xlim_upper,
             save_name=f"{features_filename}_{plot_datasets[-1]}.png",
+            title=title,
         )

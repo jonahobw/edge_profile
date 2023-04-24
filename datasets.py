@@ -2,7 +2,7 @@
 adapted from https://github.com/jonahobw/shrinkbench/blob/master/datasets/datasets.py
 """
 import json
-import pathlib
+from pathlib import Path
 from typing import Dict, List, Tuple, Union
 from collections import Counter
 
@@ -11,12 +11,42 @@ from torchvision.datasets import VisionDataset
 from torch.utils.data import DataLoader, random_split, Subset
 from torch import Generator
 
-_constructors = {
-    "MNIST": datasets.MNIST,
-    "CIFAR10": datasets.CIFAR10,
-    "CIFAR100": datasets.CIFAR100,
-    "ImageNet": datasets.ImageNet,
-}
+def nameToDataset():
+    return {
+        "MNIST": datasets.MNIST,
+        "CIFAR10": datasets.CIFAR10,
+        "CIFAR100": datasets.CIFAR100,
+        "ImageNet": datasets.ImageNet,
+        "TinyImageNet": TinyImageNet200,
+    }
+
+class TinyImageNet200(datasets.ImageFolder):
+    """
+    Dataset for TinyImageNet200.
+    Adapted from https://github.com/tribhuvanesh/knockoffnets
+    """
+
+    def __init__(self, root, train=True, transform=None):
+
+        # Initialize ImageFolder
+        super().__init__(root=root, transform=transform)
+        self.root = root
+        self._load_meta()
+
+    def _load_meta(self):
+        """Replace class names (synsets) with more descriptive labels"""
+        # Load mapping
+        synset_to_desc = dict()
+        fpath = Path(self.root) / 'words.txt'
+        with open(fpath, 'r') as rf:
+            for line in rf:
+                synset, desc = line.strip().split(maxsplit=1)
+                synset_to_desc[synset] = desc
+
+        # Replace
+        for i in range(len(self.classes)):
+            self.classes[i] = synset_to_desc[self.classes[i]]
+        self.class_to_idx = {self.classes[i]: i for i in range(len(self.classes))}
 
 
 def dataset_path(dataset, path=None):
@@ -84,7 +114,7 @@ def dataset_builder(
 
     path = dataset_path(dataset, path)
 
-    return _constructors[dataset](path, **kwargs)
+    return nameToDataset()[dataset](path, **kwargs)
 
 
 def MNIST(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None):
@@ -125,6 +155,23 @@ def CIFAR100(train=True, path=None, resize=None, normalize: Tuple[List[float], L
         "CIFAR100", train, normalize, preproc, path, resize=resize
     )
     dataset.shape = (3, 32, 32)
+    return dataset
+
+
+def TinyImageNet(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None):
+    """Sets up the tiny imagenet dataset."""
+    mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+    if normalize is not None:
+        mean, std = normalize
+    normalize = transforms.Normalize(mean=mean, std=std)
+    if train:
+        preproc = [transforms.RandomCrop(56, 4), transforms.RandomHorizontalFlip()]
+    else:
+        preproc = []
+    dataset = dataset_builder(
+        "TinyImageNet", train, normalize, preproc, path, resize=resize
+    )
+    dataset.shape = (3, 64, 64)
     return dataset
 
 
