@@ -7,7 +7,14 @@ from pathlib import Path
 from torchvision import datasets
 from torchvision.datasets import ImageFolder
 
-supported_datasets = ["CIFAR10", "tiny-imagenet-200"]
+torchvision_datasets = {
+    "MNIST": datasets.MNIST,
+    "CIFAR10": datasets.CIFAR10,
+    "CIFAR100": datasets.CIFAR100,
+    "ImageNet": datasets.ImageNet,
+}
+
+supported_datasets = ["tiny-imagenet-200"] + list(torchvision_datasets.keys())
 
 download_path = Path.cwd() / "datasets"
 
@@ -19,8 +26,8 @@ def downloadDataset(dataset_name):
         raise ValueError(f"{dataset_name} not supported.  Supported datasets are {supported_datasets}.")
     dataset_path = download_path / dataset_name
     print(f"Downloading {dataset_name} ...")
-    if dataset_name == "CIFAR10":
-        datasets.CIFAR10(root=dataset_path, download=True)
+    if dataset_name in torchvision_datasets:
+        torchvision_datasets[dataset_name](root=dataset_path, download=True)
     if dataset_name == "tiny-imagenet-200":
         download = requests.get("http://cs231n.stanford.edu/tiny-imagenet-200.zip", stream=True)
         if download.status_code != 200:  # http 200 means success

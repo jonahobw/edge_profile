@@ -26,6 +26,8 @@ plots/top_n_features
 onnx_models/
 plots/theoretical_dummy/
 knockoff/
+tensorflow/
+test_tensorflow.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

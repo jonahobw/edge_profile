@@ -17,7 +17,7 @@ def nameToDataset():
         "CIFAR10": datasets.CIFAR10,
         "CIFAR100": datasets.CIFAR100,
         "ImageNet": datasets.ImageNet,
-        "TinyImageNet": TinyImageNet200,
+        "tiny-imagenet-200": TinyImageNet200,
     }
 
 class TinyImageNet200(datasets.ImageFolder):
@@ -26,9 +26,10 @@ class TinyImageNet200(datasets.ImageFolder):
     Adapted from https://github.com/tribhuvanesh/knockoffnets
     """
 
-    def __init__(self, root, train=True, transform=None):
+    def __init__(self, root, train = True, transform=None):
 
         # Initialize ImageFolder
+        root = Path(root) / "train" if train else "val"
         super().__init__(root=root, transform=transform)
         self.root = root
         self._load_meta()
@@ -37,7 +38,7 @@ class TinyImageNet200(datasets.ImageFolder):
         """Replace class names (synsets) with more descriptive labels"""
         # Load mapping
         synset_to_desc = dict()
-        fpath = Path(self.root) / 'words.txt'
+        fpath = Path(self.root.parent) / 'words.txt'
         with open(fpath, 'r') as rf:
             for line in rf:
                 synset, desc = line.strip().split(maxsplit=1)
@@ -169,7 +170,7 @@ def TinyImageNet(train=True, path=None, resize=None, normalize: Tuple[List[float
     else:
         preproc = []
     dataset = dataset_builder(
-        "TinyImageNet", train, normalize, preproc, path, resize=resize
+        "tiny-imagenet-200", train, normalize, preproc, path, resize=resize
     )
     dataset.shape = (3, 64, 64)
     return dataset
@@ -205,8 +206,9 @@ class Dataset:
         "cifar10": CIFAR10,
         "cifar100": CIFAR100,
         "imagenet": ImageNet,
+        "tiny-imagenet-200": TinyImageNet,
     }
-    num_classes_map = {"mnist": 10, "cifar10": 10, "cifar100": 100, "imagenet": 1000}
+    num_classes_map = {"mnist": 10, "cifar10": 10, "cifar100": 100, "imagenet": 1000, "tiny-imagenet-200": 200}
 
     def __init__(
         self,
@@ -219,12 +221,15 @@ class Dataset:
         resize: int = None,
         normalize: Tuple[List[float], List[float]] = None,
         lazy_load: bool = True,
+        indices: Tuple[List[int], List[int]] = None,
     ) -> None:
         """
         data_subset_percent will divide the dataset into 2 pieces, and the first will have <data_subset_percent>% of the data.
             which portion of the data is allocated depends on <idx> which is either 0 or 1
         resize will resize the data when retrieving it.  Some models need this, most do not.  Resizing significantly slows training.
         lazy_load: if true, won't load underlying datasets until they are referenced
+        indices: a tuple of 2 lists of indices to the dataset to be used as a subset.  The first list is for the training data and
+            the second list is for the test data
         """
         self.name = dataset.lower()
         self.num_classes = self.num_classes_map[self.name]
@@ -236,6 +241,7 @@ class Dataset:
         self.resize = resize
         self.normalize = normalize
         self.lazy_load = lazy_load
+        self.indices = indices
 
         # lazy loading attributes, each is associated
         # with a property of this class with the same name but
@@ -267,6 +273,7 @@ class Dataset:
             "resize": resize,
             "normalize": normalize,
             "lazy_load": lazy_load,
+            "indices": indices,
         }
     
     @property
@@ -282,6 +289,8 @@ class Dataset:
                     [first_amount, second_amount],
                     generator=Generator().manual_seed(self.seed),
                 )[self.idx]
+            if self.indices is not None:
+                self._train_data = Subset(self._train_data, self.indices[0])
         return self._train_data
     
     @property
@@ -310,6 +319,8 @@ class Dataset:
                     [first_amount, second_amount],
                     generator=Generator().manual_seed(self.seed),
                 )[self.idx]
+            if self.indices is not None:
+                self._val_data = Subset(self._val_data, self.indices[1])
         return self._val_data
     
     @property
@@ -342,6 +353,8 @@ class Dataset:
                         [first_amount, second_amount],
                         generator=Generator().manual_seed(self.seed),
                     )[self.idx]
+            if self.indices is not None:
+                self._train_acc_data = Subset(self._train_acc_data, self.indices[0])
         return self._train_acc_data
     
     @property
