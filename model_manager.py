@@ -8,6 +8,7 @@ the surrogate model can be trained using labels from the victim model.
 import datetime
 import json
 from pathlib import Path
+import random
 import time
 from typing import Callable, Dict, List, Tuple
 import traceback
@@ -444,6 +445,9 @@ class ModelManagerBase(ABC):
 
         print({k: online_stats[k].mean for k in online_stats})
 
+    def __repr__(self) -> str:
+        return str(self.path.relative_to(Path.cwd()))
+
 
 class ProfiledModelManager(ModelManagerBase):
     """Extends ModelManagerBase to include support for profiling"""
@@ -554,9 +558,11 @@ class ProfiledModelManager(ModelManagerBase):
                 profile_path = profile_folder / f"profile_{prof_num}.csv"
                 assert profile_path.exists()
                 fit_filters[profile_path] = conf
-        
+
         if len(fit_filters) == 0:
-            raise ValueError(f"No profiles with filters {filters} found in {profile_folder}")
+            raise ValueError(
+                f"No profiles with filters {filters} found in {profile_folder}"
+            )
         latest_valid_path = latestFileFromList(list(fit_filters.keys()))
         conf = fit_filters[latest_valid_path]
         return latest_valid_path, conf
@@ -764,7 +770,7 @@ class VictimModelManager(ProfiledModelManager):
         arch_folders = [i for i in models_folder.glob("*") if i.is_dir()]
         model_paths = []
         for arch in arch_folders:
-            for model_folder in [i for i in arch.glob("*")if i.is_dir()]:
+            for model_folder in [i for i in arch.glob("*") if i.is_dir()]:
                 victim_path = (
                     models_folder
                     / arch
@@ -776,6 +782,249 @@ class VictimModelManager(ProfiledModelManager):
                 else:
                     print(f"Warning, no model found {victim_path}")
         return model_paths
+
+    def getSurrogateModelPaths(self) -> List[Path]:
+        """Returns a list of paths to surrogate models of this victim model."""
+        res = []
+        surrogate_paths = [x for x in self.path.glob(f"surrogate*")]
+        for path in surrogate_paths:
+            res.append(path / ModelManagerBase.MODEL_FILENAME)
+        return res
+
+    def generateKnockoffTransferSet(
+        self,
+        dataset_name: str,
+        transfer_size: int,
+        sample_avg: int = 10,
+        random_policy: bool = False,
+    ) -> None:
+        """
+        TODO add labels to the stored indices, the current query budget is a bit of a hack.
+        Uses adaptations of the Knockoff Nets paper https://arxiv.org/pdf/1812.02766.pdf
+        to generate a transfer set for this victim model.  A transfer set is a subset of
+        a dataset not used to train the victim model. For example, if the victim is
+        trained on CIFAR10, the transfer set could be a subset of TinyImageNet. The
+        transfer set can then be used to train a surrogate model.
+
+        Two strategies are considered: random takes a random subset, and adaptive.
+        Adaptive is not a faithful implementation of the paper.  Instead, the victim
+        model's output on samples of each class is averaged over some number of samples,
+        then the entropy of this average is taken to get a measure of how influential
+        these samples are.  Low entropy means that the samples are influential, and
+        vice versa.  There is one entropy value per class. We want to sample more
+        from influential classes, so we make a vector of (1-entropy) for each class,
+        normalize it, and then use it as a multinomial distribution from which to
+        sample elements for the transfer set.
+
+        The transfer size is also the query budget.
+
+        The resulting dataset will be stored in a json format under
+        self.path/transfer_sets/<dataset>_<datetime>.  This file will include the
+        parameters passed to this algorithm as well as the indices of the dataset
+        which are included in the transfer set.
+
+        dataset_name: name of the dataset from which to generate the transfer set (should
+            not be the dataset on which the victim model was trained)
+        transfer_size: the size of the transfer set
+        sample_avg: this is the number of samples to take per class before averaging,
+            higher number means better entropy estimation.  Only used if random_policy=0
+        random_policy: if true, generates the transfer set randomly. If false, uses the
+            adaptive method.
+        """
+        config = {
+            "dataset_name": dataset_name,
+            "transfer_size": transfer_size,
+            "sample_avg": sample_avg,
+            "random_policy": random_policy,
+        }
+        assert (
+            dataset_name != self.dataset.name
+        ), "Don't use the same dataset for training and transfer set"
+        # dataset is a torchvision.datasets.ImageFolder object
+        dataset = Dataset(
+            dataset_name,
+            resize=getModelParams(self.architecture).get("input_size", None),
+        ).train_data
+        num_classes = len(dataset.classes)
+
+        assert transfer_size <= len(
+            dataset
+        ), f"Requested transfer set size of {transfer_size} but {dataset_name} dataset has only {len(dataset)} samples."
+        assert sample_avg * num_classes < len(
+            dataset
+        ), f"Requested {sample_avg} samples per class, with {num_classes} classes this is {sample_avg * num_classes} samples but {dataset_name} dataset has only {len(dataset)} samples."
+
+        assert sample_avg * num_classes <= transfer_size, f"Requested {sample_avg} samples per class, with {num_classes} classes this is {sample_avg * num_classes} samples, but the transfer size (budget) is only {transfer_size}.  Either decrease the sample_avg or increase the transfer budget"
+
+        print(
+            f"Generating a transfer dataset for victim model {self} with configuration\n{json.dumps(config, indent=4)}\n"
+        )
+
+        sample_indices = None
+        if random_policy:
+            sample_indices = random.sample(range(len(dataset)), transfer_size)
+        else:
+            # adaptive policy
+
+            # THE FOLLOWING DOESN'T WORK BECAUSE THE SAMPLES ARE NOT
+            # SORTED IN ALL DATASETS, FOR EXAMPLE CIFAR100
+            # if the dataset samples are sorted, we need to find
+            # the start and end indices of each class and store as
+            # [(start index for class 0, end index for class 0),
+            # (start index for class 1, end index for class 1), ...]
+            # this implementation does not assume a balanced dataset
+            # use binary search
+            # transitions = []
+            # start = 0
+            # for class_idx in range(num_classes - 1):
+            #     # look for point in dataset.targets that changes from
+            #     # class_idx to class_idx + 1, this is the end index
+            #     hi = len(dataset) - 1
+            #     lo = start
+            #     while hi >= lo:
+            #         mid = (hi + lo) // 2
+            #         if dataset.targets[mid] == class_idx:
+            #             lo = mid + 1
+            #         else:
+            #             if mid > start and dataset.targets[mid - 1] == class_idx:
+            #                 # found
+            #                 transitions.append((start, mid - 1))
+            #                 start = mid
+            #                 break
+            #             hi = mid - 1
+            # # need to account for last class
+            # transitions.append((start, len(dataset) - 1))
+            #
+            # assert len(transitions) == num_classes
+            #
+            # def sampleClass(n, class_idx) -> List[int]:
+            #     # returns n samples from class <class_idx> without replacement
+            #     # need to generate n random numbers between the start and end
+            #     # indices of this class, inclusive
+            #     return random.sample(
+            #         range(transitions[class_idx][0], transitions[class_idx][1] + 1), n
+            #     )
+
+            # first collect <sample_avg> samples of each class, store as a
+            # list [[index of sample 1 of class 1, index of sample 2 of class 1, ...],
+            # [index of sample 1 of class 2, index of sample 2 of class 2, ...], ...]
+            # the samples of dataset are not necessarily sorted by class
+            print(f"Generating a mapping from indices to labels ...")
+            samples = [[] for _ in range(num_classes)]
+            for idx in range(len(dataset)):
+                samples[dataset.targets[idx]].append(idx)
+            # check that there are enough samples per class for the sample average
+            for class_name in range(num_classes):
+                assert len(samples[class_name]) >= sample_avg, f"Could only find {len(samples[class_name])} samples for class {class_idx}, but {sample_avg} samples were requested"
+            
+
+            # get <sample_avg> samples per class
+            class_samples = [random.sample(samples[class_idx], sample_avg) for class_idx in range(num_classes)]
+            # now, for each class, get the average of the victim model's output on the samples
+            # then compute (1-entropy of average output)
+            print(f"Calculating class entropies ...")
+            class_influence = []
+            for class_idx in range(num_classes):
+                sample_indices = class_samples[class_idx]
+                x = torch.stack([dataset[i][0] for i in sample_indices]).to(self.device)
+                y = self.model(x).cpu()
+                y_prob = torch.softmax(y, dim=1)
+                avg_y = torch.mean(y_prob, dim=0)
+                avg_y = avg_y / torch.sum(avg_y)
+                log_avg = torch.log(avg_y) / torch.log(torch.tensor(num_classes))
+                entropy = -1 * torch.dot(avg_y, log_avg)
+                class_influence.append(1 - entropy.item())
+
+            # now, normalize the samples array to a multinomial distribution and use that to
+            # sample from the dataset. note that we are going to use the class_samples variable as 
+            # the starting point, so each class starts with sample_avg samples.
+            samples_sum = sum(class_influence)
+            multinomial_dist = [x / samples_sum for x in class_influence]
+            config["class_importance"] = multinomial_dist
+            samples_per_class = np.random.multinomial(transfer_size - (sample_avg * num_classes), multinomial_dist).tolist()
+            samples_per_class = [samples_per_class[i] + class_samples[i] for i in range(num_classes)]
+            # check to see if we sampled some classes more than we have data for
+            overflow_samples = 0
+            unsaturated_classes = [0 for _ in range(num_classes)]
+            for class_idx in range(num_classes):
+                if len(samples[class_idx]) < samples_per_class[class_idx]:
+                    diff = samples_per_class[class_idx] - len(samples[class_idx])
+                    samples_per_class[class_idx] -= diff
+                    overflow_samples += diff
+                else:
+                    unsaturated_classes[class_idx] += len(samples[class_idx]) - samples_per_class[class_idx]
+            #sample overflows randomly
+            for x in range(overflow_samples):
+                # normalize unsaturated classes
+                unsaturated_classes_norm = [x/sum(unsaturated_classes) for x in unsaturated_classes]
+                # choose from unsaturated classes randomly
+                class_idx = np.random.multinomial(1, unsaturated_classes_norm)[0]
+                unsaturated_classes[class_idx] -= 1
+                samples_per_class[class_idx] += 1
+            config["samples_per_class"] = samples_per_class
+
+            # now generate samples per class and add them to a main list
+            print(f"Sampling classes and writing to file ...")
+            sample_indices = []
+            for class_idx, num_samples in enumerate(samples_per_class):
+                sample_indices.extend(random.sample(samples[class_idx], num_samples))
+
+        config["sample_indices"] = sample_indices
+
+        transfer_folder = self.path / "transfer_sets"
+        transfer_folder.mkdir(exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        save_path = transfer_folder / f"{dataset_name}_{timestamp}.json"
+        with open(save_path, "w+") as f:
+            json.dump(config, f, indent=4)
+        print(f"Completed generating the transfer set.")
+        
+
+    def loadKnockoffTransferSet(
+        self,
+        dataset_name: str,
+        transfer_size: int,
+        sample_avg: int = 10,
+        random_policy: bool = False,
+    ) -> Tuple[Path, Dataset]:
+        """
+        Loads a dataset from a json file produced by self.generateKnockoffTransferSet().
+        This json file will be stored in self.path/transfer_sets/
+
+        This function will search all of the json files in this folder,
+        looking for a transfer set that fits the provided arguments.
+        If none exists, raises a filenotfound error.
+
+        Return value is a tuple of (path to transfer set json file, Dataset object).
+        """
+        config = {
+            "dataset_name": dataset_name,
+            "transfer_size": transfer_size,
+            "sample_avg": sample_avg,
+            "random_policy": random_policy,
+        }
+        transfer_folder = self.path / "transfer_sets"
+        for file in transfer_folder.glob("*.json"):
+            with open(file, "r+") as f:
+                transfer_set_args = json.load(f)
+            valid = True
+            for arg in config:
+                if config[arg] != transfer_set_args[arg]:
+                    valid = False
+                    break
+            if valid:
+                break
+        if not valid:
+            raise FileNotFoundError(
+                f"No transfer sets found in {transfer_folder} matching configuration\n{json.dumps(config, indent=4)}\nCall generateKnockoffTransferSet to make one."
+            )
+
+        # only need to add indices for the training data
+        transfer_set = Dataset(
+            dataset=transfer_set_args["dataset_name"],
+            indices=(transfer_set_args["sample_indices"], []),
+        )
+        return file, transfer_set
 
 
 class QuantizedModelManager(ProfiledModelManager):
@@ -1512,7 +1761,11 @@ def profileAllQuantizedModels(
     add: bool = False,
 ):
     for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
-        quant_path = vict_path.parent / QuantizedModelManager.FOLDER_NAME / QuantizedModelManager.MODEL_FILENAME
+        quant_path = (
+            vict_path.parent
+            / QuantizedModelManager.FOLDER_NAME
+            / QuantizedModelManager.MODEL_FILENAME
+        )
         if quant_path.exists():
             quant_manager = QuantizedModelManager.load(model_path=quant_path, gpu=gpu)
             if quant_manager.isProfiled() and not add:
@@ -1566,7 +1819,11 @@ def profileAllPrunedModels(
 ):
     """Pruned models must be trained already."""
     for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
-        prune_path = vict_path.parent / PruneModelManager.FOLDER_NAME / PruneModelManager.MODEL_FILENAME
+        prune_path = (
+            vict_path.parent
+            / PruneModelManager.FOLDER_NAME
+            / PruneModelManager.MODEL_FILENAME
+        )
         if prune_path.exists():
             prune_manager = PruneModelManager.load(model_path=prune_path, gpu=gpu)
             assert prune_manager.config["epochs_trained"] > 0
@@ -1578,7 +1835,11 @@ def profileAllPrunedModels(
 
 
 def loadProfilesToFolder(
-    prefix: str = "models", folder_name: str = "victim_profiles", replace: bool = False, filters: dict=None, all: bool = True
+    prefix: str = "models",
+    folder_name: str = "victim_profiles",
+    replace: bool = False,
+    filters: dict = None,
+    all: bool = True,
 ):
     """
     For every victim model, loads all the profiles into cwd/prefix/name/
@@ -1635,7 +1896,11 @@ def loadProfilesToFolder(
 
 
 def loadPrunedProfilesToFolder(
-    prefix: str = "models", folder_name: str = "victim_profiles_pruned", replace: bool = False, filters: dict=None, all: bool = True
+    prefix: str = "models",
+    folder_name: str = "victim_profiles_pruned",
+    replace: bool = False,
+    filters: dict = None,
+    all: bool = True,
 ):
     """
     Same as loadPrunedProfilesToFolder, but for pruned models
@@ -1657,11 +1922,15 @@ def loadPrunedProfilesToFolder(
     file_count = 0
 
     for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
-        prune_path = vict_path.parent / PruneModelManager.FOLDER_NAME / PruneModelManager.MODEL_FILENAME
+        prune_path = (
+            vict_path.parent
+            / PruneModelManager.FOLDER_NAME
+            / PruneModelManager.MODEL_FILENAME
+        )
         if prune_path.exists():
             manager = PruneModelManager.load(model_path=prune_path)
             assert manager.config["epochs_trained"] > 0
-    
+
             profiles = manager.getAllProfiles(filters=filters)
             if not all:
                 profiles = [manager.getProfile(filters=filters)]
@@ -1759,13 +2028,46 @@ def predictVictimArchs(
     return predictions
 
 
+def getVictimSurrogateModels(args: dict = {}) -> List[Tuple[VictimModelManager, SurrogateModelManager]]:
+    
+    def validManager(victim_path: Path, args: dict = {}) -> List[Tuple[VictimModelManager, SurrogateModelManager]]:
+        """
+        Given a path to a victim model manger object, determine if 
+        its configuration matches the provided args and if it has a surrogate
+        model that matches the provided args.
+
+        Returns [(path to victim, path to surrogate)] if config matches
+        and [] if not.
+        """
+        manager = VictimModelManager.load(victim_path)
+        # check victim
+        for arg in args:
+            if manager.config[arg] != args[arg]:
+                return []
+        # check surrogate
+        surrogate_paths = manager.getSurrogateModelPaths()
+        for surrogate_path in surrogate_paths:
+            surrogate_manager = SurrogateModelManager.load(surrogate_path)
+            for arg in args:
+                if surrogate_manager.config[arg] != args[arg]:
+                    break
+                return [(victim_path, surrogate_path)]
+        return []
+
+    victim_paths = VictimModelManager.getModelPaths()
+    result = []
+    for vict_path in victim_paths:
+        result += validManager(victim_path=vict_path, args=args)
+    return result
+
+
 if __name__ == "__main__":
     ans = input(
         "You are running the model manager file.  Enter yes to continue, anything else to exit."
     )
     if not ans.lower() == "yes":
         exit(0)
-    
+
     profileAllPrunedModels()
     # arch = "alexnet"
     # vict_paths = VictimModelManager.getModelPaths()
