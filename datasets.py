@@ -118,7 +118,7 @@ def dataset_builder(
     return nameToDataset()[dataset](path, **kwargs)
 
 
-def MNIST(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None):
+def MNIST(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None, deterministic: bool = False):
     """Thin wrapper around torchvision.datasets.CIFAR10"""
     mean, std = 0.1307, 0.3081
     normalize = transforms.Normalize(mean=(mean,), std=(std,))
@@ -142,13 +142,13 @@ def CIFAR10(train=True, path=None, deterministic=False, resize=None, normalize: 
     return dataset
 
 
-def CIFAR100(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None):
+def CIFAR100(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None, deterministic: bool = False):
     """Thin wrapper around torchvision.datasets.CIFAR100"""
     mean, std = [0.507, 0.487, 0.441], [0.267, 0.256, 0.276]
     if normalize is not None:
         mean, std = normalize
     normalize = transforms.Normalize(mean=mean, std=std)
-    if train:
+    if train and not deterministic:
         preproc = [transforms.RandomHorizontalFlip(), transforms.RandomCrop(32, 4)]
     else:
         preproc = []
@@ -159,13 +159,13 @@ def CIFAR100(train=True, path=None, resize=None, normalize: Tuple[List[float], L
     return dataset
 
 
-def TinyImageNet(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None):
+def TinyImageNet(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None, deterministic: bool = False):
     """Sets up the tiny imagenet dataset."""
     mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     if normalize is not None:
         mean, std = normalize
     normalize = transforms.Normalize(mean=mean, std=std)
-    if train:
+    if train and not deterministic:
         preproc = [transforms.RandomCrop(56, 4), transforms.RandomHorizontalFlip()]
     else:
         preproc = []
@@ -176,7 +176,7 @@ def TinyImageNet(train=True, path=None, resize=None, normalize: Tuple[List[float
     return dataset
 
 
-def ImageNet(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None):
+def ImageNet(train=True, path=None, resize=None, normalize: Tuple[List[float], List[float]] = None, deterministic: bool = False):
     """Thin wrapper around torchvision.datasets.ImageNet"""
     # ImageNet loading from files can produce benign EXIF errors
     import warnings
@@ -187,7 +187,7 @@ def ImageNet(train=True, path=None, resize=None, normalize: Tuple[List[float], L
     if normalize is not None:
         mean, std = normalize
     normalize = transforms.Normalize(mean=mean, std=std)
-    if train:
+    if train and not deterministic:
         preproc = [transforms.RandomResizedCrop(224), transforms.RandomHorizontalFlip()]
     else:
         preproc = [transforms.Resize(256), transforms.CenterCrop(224)]
@@ -222,6 +222,7 @@ class Dataset:
         normalize: Tuple[List[float], List[float]] = None,
         lazy_load: bool = True,
         indices: Tuple[List[int], List[int]] = None,
+        deterministic: bool = False,
     ) -> None:
         """
         data_subset_percent will divide the dataset into 2 pieces, and the first will have <data_subset_percent>% of the data.
@@ -242,6 +243,7 @@ class Dataset:
         self.normalize = normalize
         self.lazy_load = lazy_load
         self.indices = indices
+        self.deterministic = deterministic
 
         # lazy loading attributes, each is associated
         # with a property of this class with the same name but
@@ -280,7 +282,7 @@ class Dataset:
     def train_data(self):
         if self._train_data is None:
             # this executes the first time the property is used
-            self._train_data = self.name_mapping[self.name](resize=self.resize, normalize=self.normalize)
+            self._train_data = self.name_mapping[self.name](resize=self.resize, normalize=self.normalize, deterministic=self.deterministic)
             if self.data_subset_percent is not None:
                 first_amount = int(len(self._train_data) * self.data_subset_percent)
                 second_amount = len(self._train_data) - first_amount
@@ -310,7 +312,7 @@ class Dataset:
     def val_data(self):
         if self._val_data is None:
             # this executes the first time self.train_data is used
-            self._val_data = self.name_mapping[self.name](train=False, resize=self.resize, normalize=self.normalize)
+            self._val_data = self.name_mapping[self.name](train=False, resize=self.resize, normalize=self.normalize, deterministic=self.deterministic)
             if self.data_subset_percent is not None:
                 first_amount = int(len(self._val_data) * self.data_subset_percent)
                 second_amount = len(self._val_data) - first_amount
@@ -340,19 +342,17 @@ class Dataset:
     def train_acc_data(self):
         if self._train_acc_data is None:
             # this executes the first time the property is used
-            self._train_acc_data = self.train_data
-            if self.name == "cifar10":
-                self._train_acc_data = self.name_mapping[self.name](
-                    deterministic=True, resize=self.resize, normalize=self.normalize
-                )
-                if self.data_subset_percent is not None:
-                    first_amount = int(len(self._train_acc_data) * self.data_subset_percent)
-                    second_amount = len(self._train_acc_data) - first_amount
-                    self._train_acc_data = random_split(
-                        self._train_acc_data,
-                        [first_amount, second_amount],
-                        generator=Generator().manual_seed(self.seed),
-                    )[self.idx]
+            self._train_acc_data = self.name_mapping[self.name](
+                deterministic=True, resize=self.resize, normalize=self.normalize
+            )
+            if self.data_subset_percent is not None:
+                first_amount = int(len(self._train_acc_data) * self.data_subset_percent)
+                second_amount = len(self._train_acc_data) - first_amount
+                self._train_acc_data = random_split(
+                    self._train_acc_data,
+                    [first_amount, second_amount],
+                    generator=Generator().manual_seed(self.seed),
+                )[self.idx]
             if self.indices is not None:
                 self._train_acc_data = Subset(self._train_acc_data, self.indices[0])
         return self._train_acc_data

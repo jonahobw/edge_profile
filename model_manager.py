@@ -9,11 +9,10 @@ import datetime
 import json
 from pathlib import Path
 import random
+import sys
 import time
 from typing import Callable, Dict, List, Tuple
-import traceback
 from abc import ABC, abstractmethod
-import shutil
 
 import torch
 from torch.nn.utils import prune
@@ -26,10 +25,8 @@ from cleverhans.torch.attacks.projected_gradient_descent import (
 from get_model import (
     get_model,
     getModelParams,
-    all_models,
     get_quantized_model,
     quantized_models,
-    name_to_family,
 )
 from datasets import Dataset
 from logger import CSVLogger
@@ -38,8 +35,7 @@ from model_metrics import correct, accuracy, both_correct
 from collect_profiles import run_command, generateExeName
 from utils import latest_file, latestFileFromList
 from format_profiles import parse_one_profile, avgProfiles
-from architecture_prediction import ArchPredBase, get_arch_pred_model
-import config
+from architecture_prediction import ArchPredBase
 
 
 def loadModel(path: Path, model: torch.nn.Module, device: torch.device = None) -> None:
@@ -112,6 +108,18 @@ class ModelManagerBase(ABC):
         # have the check below.
         if not self.path.exists():
             self.config["epochs_trained"] = self.epochs_trained
+
+        self.train_metrics = [
+            "epoch",
+            "timestamp",
+            "train_loss",
+            "train_acc1",
+            "train_acc5",
+            "val_loss",
+            "val_acc1",
+            "val_acc5",
+            "lr",
+        ]
 
     def constructModel(
         self, pretrained: bool = False, quantized: bool = False, kwargs=None
@@ -189,7 +197,7 @@ class ModelManagerBase(ABC):
             return
         self.config.update(args)
         # look for config file
-        config_files = [x for x in self.path.glob("params_*")]
+        config_files = list(self.path.glob("params_*"))
         if len(config_files) > 1:
             raise ValueError(f"Too many config files in path {self.path}")
         if len(config_files) == 1:
@@ -206,11 +214,13 @@ class ModelManagerBase(ABC):
 
     @staticmethod
     def loadConfig(path: Path) -> dict:
-        """path is not hardcoded as self.path so that this method can be called
-        by inheriting classes before self.path is set (which occurs when invoking
-        this class's constructor)
         """
-        config_files = [x for x in path.glob("params_*")]
+        Given a path to a model manager folder, return its config file as a dict
+        path is not hardcoded as self.path so that this method can be called
+        by inheriting classes before self.path is set (which occurs when invoking
+        this class's constructor).
+        """
+        config_files = list(path.glob("params_*"))
         if len(config_files) != 1:
             raise ValueError(
                 f"There are {len(config_files)} config files in path {path}\nThere should only be one."
@@ -271,36 +281,19 @@ class ModelManagerBase(ABC):
             for epoch in range(1, num_epochs + 1):
                 if debug is not None and epoch > debug:
                     break
-                loss, acc1, acc5 = self.runEpoch(
-                    train=True,
-                    epoch=epoch,
-                    optim=optim,
-                    loss_fn=loss_func,
-                    lr_scheduler=lr_scheduler,
-                    debug=debug,
-                )
-                val_loss, val_acc1, val_acc5 = self.runEpoch(
-                    train=False,
-                    epoch=epoch,
-                    optim=optim,
-                    loss_fn=loss_func,
-                    lr_scheduler=lr_scheduler,
-                    debug=debug,
-                )
 
-                metrics = {
-                    "train_loss": loss,
-                    "train_acc1": acc1,
-                    "train_acc5": acc5,
-                    "val_loss": val_loss,
-                    "val_acc1": val_acc1,
-                    "val_acc5": val_acc5,
-                    "lr": optim.param_groups[0]["lr"],
-                }
+                metrics = self.collectEpochMetrics(
+                    epoch_num=epoch,
+                    optimizer=optim,
+                    loss_fn=loss_func,
+                    lr_scheduler=lr_scheduler,
+                    debug=debug,
+                )
 
                 self.epochs_trained += 1
                 if self.save_model:
-                    # we only write to the log file once the model is saved, see below after self.saveModel()
+                    # we only write to the log file once the model is saved, 
+                    # see below after self.saveModel()
                     logger.futureWrite(
                         {
                             "timestamp": time.time() - since,
@@ -323,6 +316,42 @@ class ModelManagerBase(ABC):
         self.config["finalLR"] = optim.param_groups[0]["lr"]
         self.config.update(metrics)
         self.saveConfig()
+
+    def collectEpochMetrics(
+        self,
+        epoch_num: int,
+        optimizer: torch.optim.Optimizer,
+        loss_fn: Callable,
+        lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
+        debug: int = None,
+    ):
+        loss, acc1, acc5 = self.runEpoch(
+            train=True,
+            epoch=epoch_num,
+            optim=optimizer,
+            loss_fn=loss_fn,
+            lr_scheduler=lr_scheduler,
+            debug=debug,
+        )
+        val_loss, val_acc1, val_acc5 = self.runEpoch(
+            train=False,
+            epoch=epoch_num,
+            optim=optimizer,
+            loss_fn=loss_fn,
+            lr_scheduler=lr_scheduler,
+            debug=debug,
+        )
+
+        metrics = {
+            "train_loss": loss,
+            "train_acc1": acc1,
+            "train_acc5": acc5,
+            "val_loss": val_loss,
+            "val_acc1": val_acc1,
+            "val_acc5": val_acc5,
+            "lr": optimizer.param_groups[0]["lr"],
+        }
+        return metrics
 
     def runEpoch(
         self,
@@ -395,21 +424,6 @@ class ModelManagerBase(ABC):
 
         return loss, top1, top5
 
-    @property
-    def train_metrics(self) -> list:
-        """Generate the training metrics to be logged to a csv."""
-        return [
-            "epoch",
-            "timestamp",
-            "train_loss",
-            "train_acc1",
-            "train_acc5",
-            "val_loss",
-            "val_acc1",
-            "val_acc5",
-            "lr",
-        ]
-
     def runPGD(
         self,
         x: torch.Tensor,
@@ -444,6 +458,21 @@ class ModelManagerBase(ABC):
                 )
 
         print({k: online_stats[k].mean for k in online_stats})
+
+    def getL1WeightNorm(self, other) -> float:
+        """
+        Return the sum of elementwise differences between parameters of 
+        2 models of the same architecture.
+        """
+        if not isinstance(other.model, type(self.model)):
+            raise ValueError
+            # return float("inf")
+        return sum(
+            (x - y).abs().sum()
+            for x, y in zip(
+                self.model.state_dict().values(), other.model.state_dict().values()
+            )
+        ).item()
 
     def __repr__(self) -> str:
         return str(self.path.relative_to(Path.cwd()))
@@ -516,7 +545,7 @@ class ProfiledModelManager(ModelManagerBase):
         and associated params_{pid}.csv.
         """
         profile_folder = self.path / "profiles"
-        profile_config = [x for x in profile_folder.glob("params_*")]
+        profile_config = list(profile_folder.glob("params_*"))
         if len(profile_config) == 0:
             return False
         with open(profile_config[0], "r") as f:
@@ -540,7 +569,7 @@ class ProfiledModelManager(ModelManagerBase):
             filters = {}
         profile_folder = self.path / "profiles"
         # get config files
-        profile_config = [x for x in profile_folder.glob("params_*")]
+        profile_config = list(profile_folder.glob("params_*"))
         assert len(profile_config) > 0
 
         fit_filters = {}
@@ -580,7 +609,7 @@ class ProfiledModelManager(ModelManagerBase):
             filters = {}
         result = []
         profile_folder = self.path / "profiles"
-        profile_configs = [x for x in profile_folder.glob("params_*")]
+        profile_configs = list(profile_folder.glob("params_*"))
         for config_file in profile_configs:
             with open(config_file, "r") as f:
                 conf = json.load(f)
@@ -600,10 +629,10 @@ class ProfiledModelManager(ModelManagerBase):
         self, arch_pred_model: ArchPredBase, average: bool = False, filters: dict = None
     ) -> Tuple[str, float]:
         """
-        Given an architecture prediction model, use it to predict the architecture of the model associated
-        with this model manager.
-        average: if true, will average the features from all of the profiles on this model and then pass the
-            features to the architecture prediction model.
+        Given an architecture prediction model, use it to predict the architecture 
+        of the model associated with this model manager.
+        average: if true, will average the features from all of the profiles on this 
+        model and then pass the features to the architecture prediction model.
         filters: a dict and each argument in the dict must match
             the argument from the config file associated with a profile.
             to get a profile by name, can specify {"profile_number": "2181935"}
@@ -623,7 +652,8 @@ class ProfiledModelManager(ModelManagerBase):
 
         arch, conf = arch_pred_model.predict(profile_features)
         print(
-            f"Predicted surrogate model architecture for victim model\n{self.path}\n is {arch} with {conf * 100}% confidence."
+            f"""Predicted surrogate model architecture for victim model\n
+            {self.path}\n is {arch} with {conf * 100}% confidence."""
         )
         # format is to store results in self.config as such:
         # {
@@ -636,8 +666,8 @@ class ProfiledModelManager(ModelManagerBase):
         #    }
         # }
         #
-        # this way there is support for multiple predictions from the same model type on the same
-        # profile
+        # this way there is support for multiple predictions from the 
+        # same model type on the same profile
         prof_name = str(profile_csv.name)
         arch_conf = {"pred_arch": arch, "conf": conf}
         results = {prof_name: [arch_conf]}
@@ -675,20 +705,23 @@ class VictimModelManager(ProfiledModelManager):
         Models files are stored in a folder
         ./models/{model_architecture}/{self.name}_{date_time}/
 
-        This includes the model file, a csv documenting training, and a config file.
+        This includes the model file, a csv documenting training, and a 
+        config file.
 
         Args:
-            architecture (str): the exact string representation of the model architecture.
-                See get_model.py.
+            architecture (str): the exact string representation of 
+                the model architecture. See get_model.py.
             dataset (str): the name of the dataset all lowercase.
-            model_name (str): The name of the model, can be anything except don't use underscores.
-            load (str, optional): If provided, should be the absolute path to the model folder,
-                {cwd}/models/{model_architecture}/{self.name}{date_time}.  This will load the model
-                stored there.
-            data_subset_percent (float, optional): If provided, should be the fraction of the dataset
-                to use.  This will be generated determinisitcally.  Uses torch.utils.data.random_split
-                (see datasets.py)
-            idx (int): the index into the subset of the dataset.  0 for victim model and 1 for surrogate.
+            model_name (str): The name of the model, can be anything except
+                don't use underscores.
+            load (str, optional): If provided, should be the absolute path to
+                the model folder, {cwd}/models/{model_architecture}/{self.name}{date_time}.
+                This will load the model stored there.
+            data_subset_percent (float, optional): If provided, should be the 
+                fraction of the dataset to use.  This will be generated determinisitcally.
+                Uses torch.utils.data.random_split (see datasets.py)
+            idx (int): the index into the subset of the dataset.  0 
+                for victim model and 1 for surrogate.
         """
         path = self.generateFolder(load, architecture, model_name)
         super().__init__(
@@ -786,7 +819,7 @@ class VictimModelManager(ProfiledModelManager):
     def getSurrogateModelPaths(self) -> List[Path]:
         """Returns a list of paths to surrogate models of this victim model."""
         res = []
-        surrogate_paths = [x for x in self.path.glob(f"surrogate*")]
+        surrogate_paths = list(self.path.glob("surrogate*"))
         for path in surrogate_paths:
             res.append(path / ModelManagerBase.MODEL_FILENAME)
         return res
@@ -797,26 +830,35 @@ class VictimModelManager(ProfiledModelManager):
         transfer_size: int,
         sample_avg: int = 10,
         random_policy: bool = False,
+        entropy: bool = True,
     ) -> None:
         """
-        TODO add labels to the stored indices, the current query budget is a bit of a hack.
         Uses adaptations of the Knockoff Nets paper https://arxiv.org/pdf/1812.02766.pdf
         to generate a transfer set for this victim model.  A transfer set is a subset of
         a dataset not used to train the victim model. For example, if the victim is
         trained on CIFAR10, the transfer set could be a subset of TinyImageNet. The
         transfer set can then be used to train a surrogate model.
 
-        Two strategies are considered: random takes a random subset, and adaptive.
+        Two strategies are considered: random (takes a random subset), and adaptive.
         Adaptive is not a faithful implementation of the paper.  Instead, the victim
-        model's output on samples of each class is averaged over some number of samples,
+        model's outputs on samples of each class are averaged over some number of samples,
         then the entropy of this average is taken to get a measure of how influential
         these samples are.  Low entropy means that the samples are influential, and
         vice versa.  There is one entropy value per class. We want to sample more
-        from influential classes, so we make a vector of (1-entropy) for each class,
+        from influential classes, so we make a vector of (1 - entropy) for each class,
         normalize it, and then use it as a multinomial distribution from which to
         sample elements for the transfer set.
 
-        The transfer size is also the query budget.
+        When using the adaptive method, a confidence based measure of class influence
+        can be used instead of entropy by setting entropy to false.  The confidence is
+        metric is the max value of the averaged samples.
+
+        Right now, this function queries the victim model to calculate the entropy of
+        each class, but these queries are discarded, and the the victim model predictions
+        are generated at training time.  So the actual query budget is
+        transfer_size + (num_classes * sample_avg) but if the adversary wanted to run the
+        attack efficiently they could save these queries, making the query budget only of
+        size transfer_size.
 
         The resulting dataset will be stored in a json format under
         self.path/transfer_sets/<dataset>_<datetime>.  This file will include the
@@ -830,12 +872,14 @@ class VictimModelManager(ProfiledModelManager):
             higher number means better entropy estimation.  Only used if random_policy=0
         random_policy: if true, generates the transfer set randomly. If false, uses the
             adaptive method.
+        entropy: if true, uses entropy as a class influence measure, else uses confidence
         """
         config = {
             "dataset_name": dataset_name,
             "transfer_size": transfer_size,
             "sample_avg": sample_avg,
             "random_policy": random_policy,
+            "entropy": entropy,
         }
         assert (
             dataset_name != self.dataset.name
@@ -849,15 +893,25 @@ class VictimModelManager(ProfiledModelManager):
 
         assert transfer_size <= len(
             dataset
-        ), f"Requested transfer set size of {transfer_size} but {dataset_name} dataset has only {len(dataset)} samples."
-        assert sample_avg * num_classes < len(
-            dataset
-        ), f"Requested {sample_avg} samples per class, with {num_classes} classes this is {sample_avg * num_classes} samples but {dataset_name} dataset has only {len(dataset)} samples."
+        ), f"""Requested transfer set size of {transfer_size} but {dataset_name} 
+        dataset has only {len(dataset)} samples."""
 
-        assert sample_avg * num_classes <= transfer_size, f"Requested {sample_avg} samples per class, with {num_classes} classes this is {sample_avg * num_classes} samples, but the transfer size (budget) is only {transfer_size}.  Either decrease the sample_avg or increase the transfer budget"
+        if not random_policy:
+            assert sample_avg * num_classes < len(
+                dataset
+            ), f"""Requested {sample_avg} samples per class, with {num_classes} classes this 
+            is {sample_avg * num_classes} samples but {dataset_name} dataset has only 
+            {len(dataset)} samples."""
+
+            assert (
+                sample_avg * num_classes <= transfer_size
+            ), f"""Requested {sample_avg} samples per class, with {num_classes} classes this is 
+            {sample_avg * num_classes} samples, but the transfer size (budget) is only 
+            {transfer_size}.  Either decrease the sample_avg or increase the transfer budget"""
 
         print(
-            f"Generating a transfer dataset for victim model {self} with configuration\n{json.dumps(config, indent=4)}\n"
+            f"""Generating a transfer dataset for victim model {self} with configuration\n
+            {json.dumps(config, indent=4)}\n"""
         )
 
         sample_indices = None
@@ -909,40 +963,57 @@ class VictimModelManager(ProfiledModelManager):
             # list [[index of sample 1 of class 1, index of sample 2 of class 1, ...],
             # [index of sample 1 of class 2, index of sample 2 of class 2, ...], ...]
             # the samples of dataset are not necessarily sorted by class
-            print(f"Generating a mapping from indices to labels ...")
+            print("Generating a mapping from indices to labels ...")
             samples = [[] for _ in range(num_classes)]
             for idx in range(len(dataset)):
                 samples[dataset.targets[idx]].append(idx)
             # check that there are enough samples per class for the sample average
             for class_name in range(num_classes):
-                assert len(samples[class_name]) >= sample_avg, f"Could only find {len(samples[class_name])} samples for class {class_idx}, but {sample_avg} samples were requested"
-            
+                assert (
+                    len(samples[class_name]) >= sample_avg
+                ), f"""Could only find {len(samples[class_name])} samples for class {class_name}, 
+                but {sample_avg} samples were requested"""
 
             # get <sample_avg> samples per class
-            class_samples = [random.sample(samples[class_idx], sample_avg) for class_idx in range(num_classes)]
+            class_samples = [
+                random.sample(samples[class_idx], sample_avg)
+                for class_idx in range(num_classes)
+            ]
             # now, for each class, get the average of the victim model's output on the samples
             # then compute (1-entropy of average output)
-            print(f"Calculating class entropies ...")
+            print(f"Calculating class {'entropies' if entropy else 'confidences'} ...")
             class_influence = []
-            for class_idx in range(num_classes):
+            for class_idx in tqdm(range(num_classes)):
                 sample_indices = class_samples[class_idx]
                 x = torch.stack([dataset[i][0] for i in sample_indices]).to(self.device)
                 y = self.model(x).cpu()
-                y_prob = torch.softmax(y, dim=1)
-                avg_y = torch.mean(y_prob, dim=0)
-                avg_y = avg_y / torch.sum(avg_y)
-                log_avg = torch.log(avg_y) / torch.log(torch.tensor(num_classes))
-                entropy = -1 * torch.dot(avg_y, log_avg)
-                class_influence.append(1 - entropy.item())
+                y_prob = torch.softmax(
+                    y, dim=1
+                )  # dimensions [# of samples, # of classes in victim dataset]
+                if entropy:
+                    # get rid of 0 probability so we can take the log
+                    y_prob = torch.where(y_prob == 0.0, 1e-9, y_prob)
+                    log_avg = torch.log(y_prob) / torch.log(torch.tensor(num_classes))
+                    sample_entropy = -1 * torch.sum(torch.mul(log_avg, y_prob), dim=1)
+                    avg_entropy = torch.mean(sample_entropy).item()
+                    class_influence.append(1 - avg_entropy)
+                else:
+                    conf = torch.max(y_prob, dim=1)[0]
+                    avg_conf = torch.mean(conf).item()
+                    class_influence.append(avg_conf)
 
             # now, normalize the samples array to a multinomial distribution and use that to
-            # sample from the dataset. note that we are going to use the class_samples variable as 
+            # sample from the dataset. note that we are going to use the class_samples variable as
             # the starting point, so each class starts with sample_avg samples.
             samples_sum = sum(class_influence)
             multinomial_dist = [x / samples_sum for x in class_influence]
             config["class_importance"] = multinomial_dist
-            samples_per_class = np.random.multinomial(transfer_size - (sample_avg * num_classes), multinomial_dist).tolist()
-            samples_per_class = [samples_per_class[i] + class_samples[i] for i in range(num_classes)]
+            samples_per_class = np.random.multinomial(
+                transfer_size - (sample_avg * num_classes), multinomial_dist
+            ).tolist()
+            samples_per_class = [
+                samples_per_class[i] + sample_avg for i in range(num_classes)
+            ]
             # check to see if we sampled some classes more than we have data for
             overflow_samples = 0
             unsaturated_classes = [0 for _ in range(num_classes)]
@@ -952,19 +1023,23 @@ class VictimModelManager(ProfiledModelManager):
                     samples_per_class[class_idx] -= diff
                     overflow_samples += diff
                 else:
-                    unsaturated_classes[class_idx] += len(samples[class_idx]) - samples_per_class[class_idx]
-            #sample overflows randomly
+                    unsaturated_classes[class_idx] += (
+                        len(samples[class_idx]) - samples_per_class[class_idx]
+                    )
+            # sample overflows randomly
             for x in range(overflow_samples):
                 # normalize unsaturated classes
-                unsaturated_classes_norm = [x/sum(unsaturated_classes) for x in unsaturated_classes]
-                # choose from unsaturated classes randomly
+                unsaturated_classes_norm = [
+                    x / sum(unsaturated_classes) for x in unsaturated_classes
+                ]
+                # choose from unsaturated classes
                 class_idx = np.random.multinomial(1, unsaturated_classes_norm)[0]
                 unsaturated_classes[class_idx] -= 1
                 samples_per_class[class_idx] += 1
             config["samples_per_class"] = samples_per_class
 
             # now generate samples per class and add them to a main list
-            print(f"Sampling classes and writing to file ...")
+            print("Sampling classes and writing to file ...")
             sample_indices = []
             for class_idx, num_samples in enumerate(samples_per_class):
                 sample_indices.extend(random.sample(samples[class_idx], num_samples))
@@ -977,7 +1052,7 @@ class VictimModelManager(ProfiledModelManager):
         save_path = transfer_folder / f"{dataset_name}_{timestamp}.json"
         with open(save_path, "w+") as f:
             json.dump(config, f, indent=4)
-        print(f"Completed generating the transfer set.")
+        print("Completed generating the transfer set.")
         
 
     def loadKnockoffTransferSet(
@@ -986,6 +1061,8 @@ class VictimModelManager(ProfiledModelManager):
         transfer_size: int,
         sample_avg: int = 10,
         random_policy: bool = False,
+        entropy: bool = True,
+        force: bool = False,
     ) -> Tuple[Path, Dataset]:
         """
         Loads a dataset from a json file produced by self.generateKnockoffTransferSet().
@@ -993,7 +1070,12 @@ class VictimModelManager(ProfiledModelManager):
 
         This function will search all of the json files in this folder,
         looking for a transfer set that fits the provided arguments.
-        If none exists, raises a filenotfound error.
+        If none exists and force is false, raises a filenotfound error.
+
+        If force is true, generates the transfer set first.
+
+        Note that the labels of the transfer set are still the original dataset labels,
+        so when training a surrogate model, the victim model needs to be queried to get the labels.
 
         Return value is a tuple of (path to transfer set json file, Dataset object).
         """
@@ -1002,8 +1084,10 @@ class VictimModelManager(ProfiledModelManager):
             "transfer_size": transfer_size,
             "sample_avg": sample_avg,
             "random_policy": random_policy,
+            "entropy": entropy,
         }
         transfer_folder = self.path / "transfer_sets"
+        valid = transfer_folder.exists()
         for file in transfer_folder.glob("*.json"):
             with open(file, "r+") as f:
                 transfer_set_args = json.load(f)
@@ -1015,14 +1099,35 @@ class VictimModelManager(ProfiledModelManager):
             if valid:
                 break
         if not valid:
+            if force:
+                self.generateKnockoffTransferSet(
+                    dataset_name=dataset_name,
+                    transfer_size=transfer_size,
+                    sample_avg=sample_avg,
+                    random_policy=random_policy,
+                    entropy=entropy,
+                )
+                return self.loadKnockoffTransferSet(
+                    dataset_name=dataset_name,
+                    transfer_size=transfer_size,
+                    sample_avg=sample_avg,
+                    random_policy=random_policy,
+                    entropy=entropy,
+                )
             raise FileNotFoundError(
-                f"No transfer sets found in {transfer_folder} matching configuration\n{json.dumps(config, indent=4)}\nCall generateKnockoffTransferSet to make one."
+                f"""No transfer sets found in {transfer_folder} matching configuration\n
+                {json.dumps(config, indent=4)}\nCall generateKnockoffTransferSet to make
+                 one or set force=True."""
             )
 
         # only need to add indices for the training data
         transfer_set = Dataset(
             dataset=transfer_set_args["dataset_name"],
-            indices=(transfer_set_args["sample_indices"], []),
+            indices=(
+                transfer_set_args["sample_indices"],
+                [],
+            ),  # 2nd element is for validation data
+            deterministic=True,
         )
         return file, transfer_set
 
@@ -1258,8 +1363,8 @@ class PruneModelManager(ProfiledModelManager):
 
 class SurrogateModelManager(ModelManagerBase):
     """
-    Constructs the surrogate model with a paired victim model, trains using from the labels from victim
-    model.
+    Constructs the surrogate model with a paired victim model, 
+    trains using from the labels from victim model.
     """
 
     FOLDER_NAME = "surrogate"
@@ -1287,14 +1392,15 @@ class SurrogateModelManager(ModelManagerBase):
         if isinstance(self.victim_model, VictimModelManager):
             assert self.victim_model.config["epochs_trained"] > 0
         self.arch_pred_model_name = arch_pred_model_name
-        time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        path = self.victim_model.path / f"{self.FOLDER_NAME}_{time}"
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = self.victim_model.path / f"{self.FOLDER_NAME}_{timestamp}"
         self.pretrained = pretrained
         if load_path is None:
             # creating this object for the first time
             if not self.victim_model.isProfiled():
                 print(
-                    f"Warning, victim model {self.victim_model.path} has not been profiled and a surrogate model is being created."
+                    f"""Warning, victim model {self.victim_model.path} has not been 
+                    profiled and a surrogate model is being created."""
                 )
             self.arch_confidence = arch_conf
             if save_model:
@@ -1333,8 +1439,49 @@ class SurrogateModelManager(ModelManagerBase):
                 "arch_pred_model_name": arch_pred_model_name,
                 "arch_confidence": self.arch_confidence,
                 "pretrained": self.pretrained,
+                "knockoff_transfer_set_path": "",
             }
         )
+        self.train_metrics.extend(
+            [
+                "train_agreement",
+                "val_agreement",
+                "l1_weight_bound",
+            ]
+        )
+        self.knockoff_transfer_set = None
+        self.train_with_transfer_set = (
+            False  # if true, the transfer set will be used for training
+        )
+
+    def loadKnockoffTransferSet(
+        self,
+        dataset_name: str,
+        transfer_size: int,
+        sample_avg: int = 10,
+        random_policy: bool = False,
+        entropy: bool = True,
+        force: bool = False,
+    ):
+        self.knockoff_transfer_set = self.victim_model.loadKnockoffTransferSet(
+            dataset_name=dataset_name,
+            transfer_size=transfer_size,
+            sample_avg=sample_avg,
+            random_policy=random_policy,
+            entropy=entropy,
+            force=force,
+        )
+        self.train_with_transfer_set = True
+        self.saveConfig({
+            "knockoff_transfer_set": {
+                "path":  str(self.knockoff_transfer_set[0]),
+                "dataset_name": dataset_name,
+                "transfer_size": transfer_size,
+                "sample_avg": sample_avg,
+                "random_policy": random_policy,
+                "entropy": entropy,
+            },
+        })
 
     @staticmethod
     def load(model_path: str, gpu: int = -1):
@@ -1342,10 +1489,9 @@ class SurrogateModelManager(ModelManagerBase):
         model_path is a path to a surrogate models checkpoint,
         they are stored under {victim_model_path}/surrogate_{time}/checkpoint.pt
         """
-        vict_model_path = (
-            Path(model_path).parent.parent / VictimModelManager.MODEL_FILENAME
-        )
-        load_folder = Path(model_path).parent
+        model_path = Path(model_path)
+        vict_model_path = model_path.parent.parent / VictimModelManager.MODEL_FILENAME
+        load_folder = model_path.parent
         conf = ModelManagerBase.loadConfig(load_folder)
         surrogate_manager = SurrogateModelManager(
             victim_model_path=vict_model_path,
@@ -1359,6 +1505,47 @@ class SurrogateModelManager(ModelManagerBase):
         print(f"Loaded surrogate model\n{model_path}\n")
         return surrogate_manager
 
+    def collectEpochMetrics(
+        self,
+        epoch_num: int,
+        optimizer: torch.optim.Optimizer,
+        loss_fn: Callable,
+        lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
+        debug: int = None,
+    ):
+        loss, acc1, acc5, agreement = self.runEpoch(
+            train=True,
+            epoch=epoch_num,
+            optim=optimizer,
+            loss_fn=loss_fn,
+            lr_scheduler=lr_scheduler,
+            debug=debug,
+        )
+        val_loss, val_acc1, val_acc5, val_agreement = self.runEpoch(
+            train=False,
+            epoch=epoch_num,
+            optim=optimizer,
+            loss_fn=loss_fn,
+            lr_scheduler=lr_scheduler,
+            debug=debug,
+        )
+
+        l1_weight_bound = self.getL1WeightNorm(self.victim_model)
+
+        metrics = {
+            "train_loss": loss,
+            "train_acc1": acc1,
+            "train_acc5": acc5,
+            "val_loss": val_loss,
+            "val_acc1": val_acc1,
+            "val_acc5": val_acc5,
+            "lr": optimizer.param_groups[0]["lr"],
+            "train_agreement": agreement,
+            "val_agreement": val_agreement,
+            "l1_weight_bound": l1_weight_bound,
+        }
+        return metrics
+
     def runEpoch(
         self,
         train: bool,
@@ -1370,22 +1557,28 @@ class SurrogateModelManager(ModelManagerBase):
     ) -> tuple[int]:
         """
         Run a single epoch.
-        Uses L1 loss between vitim model predictions and surrogate model predictions.
-        Accuracy is still computed on the original validation set.
+        Uses loss between vitim model predictions and surrogate model predictions.
+        validation is done on victim's validation dataset.
+        agreement is the percent of samples for which the victim and surrogate's
+        top1 prediction is the same.
         """
 
         self.model.eval()
         prefix = "val"
-        dl = self.dataset.val_dl
+        dl = self.victim_model.dataset.val_dl
         if train:
             self.model.train()
             prefix = "train"
-            dl = self.dataset.train_dl
+            if self.train_with_transfer_set:
+                dl = self.knockoff_transfer_set[1].train_dl
+            else:
+                dl = self.dataset.train_dl
         train_loss = torch.nn.L1Loss()
 
         total_loss = OnlineStats()
         acc1 = OnlineStats()
         acc5 = OnlineStats()
+        agreement = OnlineStats()
         step_size = OnlineStats()
         step_size.add(optim.param_groups[0]["lr"])
 
@@ -1402,15 +1595,16 @@ class SurrogateModelManager(ModelManagerBase):
                 victim_yhat = self.victim_model.model(x)
                 victim_yhat = torch.autograd.Variable(victim_yhat, requires_grad=False)
                 yhat = self.model(x)
+                loss = train_loss(yhat, victim_yhat)
                 if train:
-                    loss = train_loss(yhat, victim_yhat)
                     optim.zero_grad()
                     loss.backward()
                     optim.step()
-                else:
-                    loss = loss_fn(yhat, y)
 
                 c1, c5 = correct(yhat, y, (1, 5))
+                agreement.add(
+                    correct(yhat, torch.argmax(victim_yhat, dim=1))[0] / len(x)
+                )
                 total_loss.add(loss.item() / len(x))
                 acc1.add(c1 / len(x))
                 acc5.add(c5 / len(x))
@@ -1419,28 +1613,19 @@ class SurrogateModelManager(ModelManagerBase):
                     loss=total_loss.mean,
                     top1=acc1.mean,
                     top5=acc5.mean,
+                    agreement=agreement.mean,
                     step_size=step_size.mean,
                 )
 
         loss = total_loss.mean
         top1 = acc1.mean
         top5 = acc5.mean
+        agreement = agreement.mean
 
         if train and debug is None:
             lr_scheduler.step(loss)
 
-        # commented out because we want the training loss to be the loss between
-        # victim and surrogate model predictions.
-        # note that top1 and top5 accuracy don't mean much for the training epochs.
-        #     # get actual train accuracy/loss after weights update
-        #     top1, top5, loss = accuracy(
-        #         model=self.model,
-        #         dataloader=self.dataset.train_acc_dl,
-        #         loss_func=loss_fn,
-        #         topk=(1, 5),
-        #     )
-
-        return loss, top1, top5
+        return loss, top1, top5, agreement
 
     def transferAttackPGD(
         self,
@@ -1452,8 +1637,8 @@ class SurrogateModelManager(ModelManagerBase):
         debug: int = None,
     ):
         """
-        Run a transfer attack, generating adversarial inputs on surrogate model and applying them
-        to the victim model.
+        Run a transfer attack, generating adversarial inputs on 
+        surrogate model and applying them to the victim model.
         Code adapted from cleverhans tutorial
         https://github.com/cleverhans-lab/cleverhans/blob/master/tutorials/torch/cifar10_tutorial.py
         """
@@ -1560,7 +1745,6 @@ class SurrogateModelManager(ModelManagerBase):
             else:
                 self.config["transfer_results"][f"{data}_results"] = results
             self.saveConfig()
-        return
 
     def loadVictim(self, victim_model_path: str, gpu: int):
         victim_folder = Path(victim_model_path).parent
@@ -1571,538 +1755,5 @@ class SurrogateModelManager(ModelManagerBase):
         return VictimModelManager.load(model_path=victim_model_path, gpu=gpu)
 
 
-def trainOneVictim(
-    model_arch, epochs=150, gpu: int = -1, debug: int = None, save_model: bool = True
-) -> VictimModelManager:
-    a = VictimModelManager(
-        architecture=model_arch,
-        dataset="cifar10",
-        model_name=model_arch,
-        gpu=gpu,
-        save_model=save_model,
-    )
-    a.trainModel(num_epochs=epochs, debug=debug)
-    return a
-
-
-def continueVictimTrain(
-    vict_path: Path, epochs: int = 1, gpu: int = -1, debug: int = None
-):
-    manager = VictimModelManager.load(model_path=vict_path, gpu=gpu)
-    manager.trainModel(num_epochs=epochs, debug=debug, replace=True)
-
-
-def trainVictimModels(
-    epochs=150,
-    gpu: int = -1,
-    reverse: bool = False,
-    debug: int = None,
-    repeat: bool = False,
-    models: List[str] = None,
-):
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    file_path = Path.cwd() / f"train_progress_{timestamp}.txt"
-    f = open(file_path, "w")
-
-    if models is None:
-        models = all_models
-    if reverse:
-        models.reverse()
-    start = time.time()
-
-    for i, model in enumerate(models):
-        iter_start = time.time()
-        if debug and i > debug:
-            break
-        model_arch_folder = Path.cwd() / "models" / model
-        if not repeat and model_arch_folder.exists():
-            continue
-        try:
-            manager = trainOneVictim(model, epochs=epochs, gpu=gpu, debug=debug)
-            f.write(f"{model} success\n")
-            config.EMAIL.email_update(
-                start=start,
-                iter_start=iter_start,
-                iter=i,
-                total_iters=len(models),
-                subject=f"Victim {model} Finished Training",
-                params=manager.config,
-            )
-        except Exception as e:
-            print(e)
-            f.write(
-                f"\n\n{model} failed, error\n{e}\ntraceback:\n{traceback.format_exc()}\n\n"
-            )
-            config.EMAIL.email(
-                f"Failed While Training {model}", f"{traceback.format_exc()}"
-            )
-    f.close()
-
-
-def profileAllVictimModels(
-    gpu: int = 0,
-    prefix: str = None,
-    nvprof_args: dict = {},
-    count: int = 1,
-    add: bool = False,
-):
-    """Victim models must be trained already."""
-    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
-        vict_manager = VictimModelManager.load(model_path=vict_path, gpu=gpu)
-        assert vict_manager.config["epochs_trained"] > 0
-        if vict_manager.isProfiled() and not add:
-            print(f"{vict_manager.model_name} is already profiled, skipping...")
-            continue
-        for i in range(count):
-            vict_manager.runNVProf(**nvprof_args)
-
-
-def trainSurrogateModels(
-    predict: bool = True,
-    arch_pred_model_type: str = "nn",
-    model_paths: List[str] = None,
-    epochs=50,
-    gpu=0,
-    reverse=False,
-    debug=None,
-    save_model: bool = True,
-    patience: int = 5,
-    df=None,
-    average_profiles: bool = False,
-    filters: dict = None,
-):
-    """Victim models must be trained and profiled already."""
-    if model_paths is None:
-        model_paths = VictimModelManager.getModelPaths()
-    if reverse:
-        model_paths.reverse()
-    start = time.time()
-
-    for i, victim_path in enumerate(model_paths):
-        iter_start = time.time()
-        vict_manager = VictimModelManager.load(victim_path)
-        vict_name = Path(victim_path).parent.name
-        if predict:
-            arch, conf, model = vict_manager.predictVictimArch(
-                model=get_arch_pred_model(model_type=arch_pred_model_type, df=df),
-                average=average_profiles,
-                filters=filters,
-            )
-        else:
-            print(
-                f"Warning, predict is False, not predicting for model {vict_manager.path}"
-            )
-            arch = vict_manager.architecture
-            arch_pred_model_name = None
-            conf = 0.0
-        try:
-            surrogate_model = SurrogateModelManager(
-                victim_model_path=victim_path,
-                architecture=arch,
-                arch_conf=conf,
-                arch_pred_model_name=arch_pred_model_name,
-                gpu=gpu,
-                save_model=save_model,
-            )
-            surrogate_model.trainModel(
-                num_epochs=epochs, patience=patience, debug=debug
-            )
-            config.EMAIL.email_update(
-                start=start,
-                iter_start=iter_start,
-                iter=i,
-                total_iters=len(model_paths),
-                subject=f"Surrogate Model for Victim {vict_name} Finished Training",
-                params=surrogate_model.config,
-            )
-        except Exception as e:
-            print(e)
-            config.EMAIL.email(
-                f"Failed Training Surrogate model for victim Model {vict_name}",
-                f"{traceback.format_exc()}",
-            )
-
-
-def runTransferSurrogateModels(
-    prefix: str = None,
-    gpu=0,
-    eps=0.031372549,
-    step_size=0.0078431,
-    iterations=10,
-    train_data: bool = True,
-    debug: int = None,
-):
-    """Both surrogate and victim models must be trained already."""
-    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
-        surrogate_manager = SurrogateModelManager.load(model_path=vict_path, gpu=gpu)
-        surrogate_manager.transferAttackPGD(
-            eps=eps,
-            step_size=step_size,
-            iterations=iterations,
-            train_data=train_data,
-            debug=debug,
-        )
-
-
-def quantizeVictimModels(save: bool = True, prefix: str = None):
-    """Victim models must be trained already"""
-    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
-        arch = vict_path.parent.parent.name
-        if arch in quantized_models:
-            print(f"Quantizing {arch}...")
-            QuantizedModelManager(victim_model_path=vict_path, save_model=save)
-
-
-def profileAllQuantizedModels(
-    gpu: int = 0,
-    prefix: str = None,
-    nvprof_args: dict = {},
-    count: int = 1,
-    add: bool = False,
-):
-    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
-        quant_path = (
-            vict_path.parent
-            / QuantizedModelManager.FOLDER_NAME
-            / QuantizedModelManager.MODEL_FILENAME
-        )
-        if quant_path.exists():
-            quant_manager = QuantizedModelManager.load(model_path=quant_path, gpu=gpu)
-            if quant_manager.isProfiled() and not add:
-                print(f"{quant_manager.model_name} is already profiled, skipping...")
-                continue
-            for i in range(count):
-                quant_manager.runNVProf(**nvprof_args)
-
-
-def pruneOneVictim(
-    vict_path: Path,
-    ratio: float = 0.5,
-    finetune_epochs: int = 20,
-    gpu: int = -1,
-    save: bool = True,
-):
-    """Victim models must be trained already"""
-    prune_manager = PruneModelManager(
-        victim_model_path=vict_path,
-        ratio=ratio,
-        finetune_epochs=finetune_epochs,
-        gpu=gpu,
-        save_model=save,
-    )
-
-
-def pruneVictimModels(
-    prefix: str = None,
-    ratio: float = 0.5,
-    finetune_epochs: int = 20,
-    gpu: int = -1,
-    save: bool = True,
-):
-    """Victim models must be trained already"""
-    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
-        pruneOneVictim(
-            vict_path=vict_path,
-            ratio=ratio,
-            finetune_epochs=finetune_epochs,
-            gpu=gpu,
-            save=save,
-        )
-
-
-def profileAllPrunedModels(
-    gpu: int = 0,
-    prefix: str = None,
-    nvprof_args: dict = {},
-    count: int = 1,
-    add: bool = False,
-):
-    """Pruned models must be trained already."""
-    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
-        prune_path = (
-            vict_path.parent
-            / PruneModelManager.FOLDER_NAME
-            / PruneModelManager.MODEL_FILENAME
-        )
-        if prune_path.exists():
-            prune_manager = PruneModelManager.load(model_path=prune_path, gpu=gpu)
-            assert prune_manager.config["epochs_trained"] > 0
-            if prune_manager.isProfiled() and not add:
-                print(f"{prune_manager.model_name} is already profiled, skipping...")
-                continue
-            for i in range(count):
-                prune_manager.runNVProf(**nvprof_args)
-
-
-def loadProfilesToFolder(
-    prefix: str = "models",
-    folder_name: str = "victim_profiles",
-    replace: bool = False,
-    filters: dict = None,
-    all: bool = True,
-):
-    """
-    For every victim model, loads all the profiles into cwd/prefix/name/
-    which is organized by model folder
-    folder_name: results will be stored to cwd/folder_name
-    Additionally creates a config json file where the keys are the paths to the profiles
-    and the values are dicts of information about the profile such as path to actual profile,
-    actual model architecture and architecture family, and model name.
-    filters: a dict and each argument in the dict must match
-        the argument from the config file associated with a profile.
-        to get a profile by name, can specify {"profile_number": "2181935"}
-    all: if true, loads all the profiles, else loads one per victim model
-    """
-    config_name = "config.json"
-    all_config = {}
-
-    folder = Path.cwd() / folder_name
-    if folder.exists():
-        if not replace:
-            print(
-                f"loadProfilesToFolder: folder already exists and replace is false, returning"
-            )
-            return
-            # raise FileExistsError
-        shutil.rmtree(folder)
-    folder.mkdir(exist_ok=True, parents=True)
-
-    file_count = 0
-
-    vict_model_paths = VictimModelManager.getModelPaths(prefix=prefix)
-    print(f"All model paths: {vict_model_paths}")
-    for vict_path in vict_model_paths:
-        print(f"Getting profiles for {vict_path.parent.name}...")
-        manager = VictimModelManager.load(vict_path)
-        profiles = manager.getAllProfiles(filters=filters)
-        if not all:
-            profiles = [manager.getProfile(filters=filters)]
-        for profile_path, config in profiles:
-            config["model"] = manager.architecture
-            config["model_path"] = str(manager.path)
-            config["manager_name"] = manager.model_name
-            config["model_family"] = name_to_family[manager.architecture]
-            new_name = f"profile_{manager.architecture}_{file_count}.csv"
-            new_path = folder / new_name
-            shutil.copy(profile_path, new_path)
-            file_count += 1
-            all_config[str(new_name)] = config
-            print(f"\tSaved Profile {profile_path.name} to {new_path}")
-
-    # save config file
-    config_path = folder / config_name
-    with open(config_path, "w") as f:
-        json.dump(all_config, f, indent=4)
-
-
-def loadPrunedProfilesToFolder(
-    prefix: str = "models",
-    folder_name: str = "victim_profiles_pruned",
-    replace: bool = False,
-    filters: dict = None,
-    all: bool = True,
-):
-    """
-    Same as loadPrunedProfilesToFolder, but for pruned models
-    """
-    config_name = "config.json"
-    all_config = {}
-
-    folder = Path.cwd() / folder_name
-    if folder.exists():
-        if not replace:
-            print(
-                f"loadProfilesToFolder: folder already exists and replace is false, returning"
-            )
-            return
-            # raise FileExistsError
-        shutil.rmtree(folder)
-    folder.mkdir(exist_ok=True, parents=True)
-
-    file_count = 0
-
-    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
-        prune_path = (
-            vict_path.parent
-            / PruneModelManager.FOLDER_NAME
-            / PruneModelManager.MODEL_FILENAME
-        )
-        if prune_path.exists():
-            manager = PruneModelManager.load(model_path=prune_path)
-            assert manager.config["epochs_trained"] > 0
-
-            profiles = manager.getAllProfiles(filters=filters)
-            if not all:
-                profiles = [manager.getProfile(filters=filters)]
-            for profile_path, config in profiles:
-                config["model"] = manager.architecture
-                config["model_path"] = str(manager.path)
-                config["manager_name"] = manager.model_name
-                config["model_family"] = name_to_family[manager.architecture]
-                new_name = f"profile_{manager.architecture}_{file_count}.csv"
-                new_path = folder / new_name
-                shutil.copy(profile_path, new_path)
-                file_count += 1
-                all_config[str(new_name)] = config
-                print(f"\tSaved Profile {profile_path.name} to {new_path}")
-
-    # save config file
-    config_path = folder / config_name
-    with open(config_path, "w") as f:
-        json.dump(all_config, f, indent=4)
-
-
-def predictVictimArchs(
-    model: ArchPredBase,
-    folder: Path,
-    name: str = "predictions",
-    save: bool = True,
-    topk=5,
-    verbose: bool = True,
-):
-    """Iterates through the profiles in <folder> which was generated
-    by loadProfilesToFolder(), the architecture of each, and storing
-    a report in a json file called <name>
-    """
-    assert folder.exists()
-
-    predictions = {}
-
-    config_path = latest_file(folder, pattern="*.json")
-    with open(config_path, "r") as f:
-        config = json.load(f)
-
-    total_tested = 0
-    total_correctk = {k: 0 for k in range(1, topk + 1)}
-    family_correct = 0
-    for profile_name in config:
-        profile_path = folder / profile_name
-        profile_features = parse_one_profile(
-            profile_path, gpu=config[profile_name]["gpu"]
-        )
-        true_arch = config[profile_name]["model"]
-        true_family = config[profile_name]["model_family"]
-
-        preds = model.topKConf(profile_features, k=topk)
-        total_tested += 1
-        for k in range(1, topk + 1):
-            top_k_preds = preds[:k]
-            correct = true_arch in [x[0] for x in top_k_preds]
-            if correct:
-                total_correctk[k] += 1
-            if k == 1:
-                pred_arch, conf = top_k_preds[0]
-                # print(
-                #     f"Predicted architecture for victim model {config[profile_name]['manager_name']} is {arch} with {conf * 100}% confidence."
-                # )
-                predictions[profile_name] = {
-                    "pred_arch": pred_arch,
-                    "conf": conf,
-                    "true_arch": true_arch,
-                    "true_family": true_family,
-                }
-                predictions[profile_name]["correct"] = correct
-                predictions[profile_name]["family_correct"] = False
-                if name_to_family[pred_arch] == true_family:
-                    predictions[profile_name]["family_correct"] = True
-                    family_correct += 1
-
-        predictions[profile_name]["topk_labels"] = [x[0] for x in top_k_preds]
-        predictions[profile_name]["topk_conf"] = [x[1] for x in top_k_preds]
-
-    predictions["total_tested"] = total_tested
-    predictions["total_correctk"] = {k: total_correctk[k] for k in total_correctk}
-    predictions["family_correct"] = family_correct
-    predictions["accuracy_k"] = {
-        k: total_correctk[k] / total_tested for k in total_correctk
-    }
-    predictions["family_accuracy"] = family_correct / total_tested
-
-    if verbose:
-        print(json.dumps(predictions, indent=4))
-
-    if save:
-        report_path = folder / f"{name}.json"
-        with open(report_path, "w") as f:
-            json.dump(predictions, f, indent=4)
-    return predictions
-
-
-def getVictimSurrogateModels(args: dict = {}) -> List[Tuple[VictimModelManager, SurrogateModelManager]]:
-    
-    def validManager(victim_path: Path, args: dict = {}) -> List[Tuple[VictimModelManager, SurrogateModelManager]]:
-        """
-        Given a path to a victim model manger object, determine if 
-        its configuration matches the provided args and if it has a surrogate
-        model that matches the provided args.
-
-        Returns [(path to victim, path to surrogate)] if config matches
-        and [] if not.
-        """
-        manager = VictimModelManager.load(victim_path)
-        # check victim
-        for arg in args:
-            if manager.config[arg] != args[arg]:
-                return []
-        # check surrogate
-        surrogate_paths = manager.getSurrogateModelPaths()
-        for surrogate_path in surrogate_paths:
-            surrogate_manager = SurrogateModelManager.load(surrogate_path)
-            for arg in args:
-                if surrogate_manager.config[arg] != args[arg]:
-                    break
-                return [(victim_path, surrogate_path)]
-        return []
-
-    victim_paths = VictimModelManager.getModelPaths()
-    result = []
-    for vict_path in victim_paths:
-        result += validManager(victim_path=vict_path, args=args)
-    return result
-
-
 if __name__ == "__main__":
-    ans = input(
-        "You are running the model manager file.  Enter yes to continue, anything else to exit."
-    )
-    if not ans.lower() == "yes":
-        exit(0)
-
-    profileAllPrunedModels()
-    # arch = "alexnet"
-    # vict_paths = VictimModelManager.getModelPaths()
-    # arch_path = [x for x in vict_paths if x.find(arch) >= 0][0]
-    # manager = QuantizedModelManager(arch_path)
-
-    # quantizeVictimModels()
-    # pruneVictimModels(gpu=0)
-    # trainAllVictimModels(1, debug=2, reverse=True)
-    # profileAllQuantizedModels()
-    # profileAllVictimModels()
-    # trainSurrogateModels(reverse=False, gpu=-1)
-    # runTransferSurrogateModels(gpu=-1)
-    # trainOneVictim("alexnet")
-    # trainVictimModels(
-    #     gpu=0,
-    #     models = ['squeezenet1_0', 'squeezenet1_1']
-    # )
-    # time.sleep(100)
-    # profileAllVictimModels(add=True)
-
-    # trainOneVictim(model_arch="mobilenet_v2", epochs=1, debug=1, save_model=False)
-
-    # path = [x for x in VictimModelManager.getModelPaths() if str(x).find("mobilenet_v2") >= 0][0]
-    # quant_manager = QuantizedModelManager(victim_model_path=path, save_model=False)
-
-    # continueVictimTrain(path, debug=1)
-    # surrogate_manager = SurrogateModelManager(victim_model_path=path, save_model=True)
-    # surrogate_manager.trainModel(num_epochs=1, debug=1)
-    # surrogate_manager = SurrogateModelManager.load(path)
-    # surrogate_manager.trainModel(num_epochs=2, debug=2, replace=True)
-
-    # surrogate_manager.transferAttackPGD(eps=8/255, step_size=2/255, iterations=10, debug=1)
-    # loadProfilesToFolder(all=False, replace=True)
-    # loadProfilesToFolder(folder_name="victim_profiles_tesla", filters={"gpu_type": "tesla_t4"}, all=False)
-    # predictVictimArchs()
-    # trainSurrogateModels(predict=False)
-    exit(0)
+    sys.exit(0)

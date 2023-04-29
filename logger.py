@@ -8,7 +8,7 @@ import torch
 
 class CSVLogger:
 
-    def __init__(self, folder, columns, append: bool = True):
+    def __init__(self, folder, columns, append: bool = True, name: str = None):
         """General purpose CSV Logger
         Initialized with a set of columns, it then has two operations
           - set(**kwargs) - to add entries into the current row
@@ -17,7 +17,10 @@ class CSVLogger:
             folder {str} -- Path to folder where file will be created
             columns {List[str]} -- List of keys that CSV is going to log
         """
-        file = folder / "logs.csv"
+        if name is None:
+            name = "logs.csv"
+            assert name.endswith(".csv")
+        file = folder / name
         print(f"Logging results to {file}")
         file_existed = file.exists()
         if file_existed and not append:
