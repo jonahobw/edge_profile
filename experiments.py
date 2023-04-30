@@ -8,11 +8,17 @@ import shutil
 
 from get_model import all_models, quantized_models, name_to_family
 import config
-from model_manager import VictimModelManager, SurrogateModelManager, PruneModelManager, QuantizedModelManager
+from model_manager import (
+    VictimModelManager,
+    SurrogateModelManager,
+    PruneModelManager,
+    QuantizedModelManager,
+)
 from architecture_prediction import get_arch_pred_model, ArchPredBase
 from utils import latest_file, dict_to_str
 from format_profiles import parse_one_profile
 from logger import CSVLogger
+
 
 def trainOneVictim(
     model_arch, epochs=150, gpu: int = -1, debug: int = None, save_model: bool = True
@@ -523,8 +529,17 @@ def getVictimSurrogateModels(
     return result
 
 
-def testKnockoffTrain(model_arch = "resnet18", dataset="cifar100", gpu=-1, debug: int = None, num_epochs: int = 20):
-    vict_path = [x for x in VictimModelManager.getModelPaths() if str(x).find(model_arch) >= 0][0]
+def testKnockoffTrain(
+    model_arch="resnet18",
+    dataset="cifar100",
+    gpu=-1,
+    debug: int = None,
+    num_epochs: int = 20,
+    run_attack: bool = True,
+):
+    vict_path = [
+        x for x in VictimModelManager.getModelPaths() if str(x).find(model_arch) >= 0
+    ][0]
     columns = [
         "dataset",
         "transfer_size",
@@ -542,14 +557,18 @@ def testKnockoffTrain(model_arch = "resnet18", dataset="cifar100", gpu=-1, debug
         "l1_weight_bound",
     ]
     log_path = Path.cwd() / f"test_knockoff_train_{dataset}.csv"
-    logger = CSVLogger(log_path.parent, columns, name=log_path.name, append=log_path.exists())
+    # todo if you add a new column but use append mode then the new column
+    # will be dropped, so set append = False
+    logger = CSVLogger(
+        log_path.parent, columns, name=log_path.name, append=False
+    )
     pretrained = False  # todo fix number of classes
 
     for transfer_size in [10000, 50000]:
         for sample_avg in [5, 10, 50]:
             for random_policy in [True, False]:
                 for entropy in [True, False]:
-                    #for pretrained in [True, False]:
+                    # for pretrained in [True, False]:
                     try:
                         manager = SurrogateModelManager(
                             vict_path,
@@ -557,7 +576,7 @@ def testKnockoffTrain(model_arch = "resnet18", dataset="cifar100", gpu=-1, debug
                             arch_conf=1.0,
                             arch_pred_model_name="rf",
                             pretrained=pretrained,
-                            gpu=gpu
+                            gpu=gpu,
                         )
                         manager.loadKnockoffTransferSet(
                             dataset_name=dataset,
@@ -565,9 +584,11 @@ def testKnockoffTrain(model_arch = "resnet18", dataset="cifar100", gpu=-1, debug
                             sample_avg=sample_avg,
                             random_policy=random_policy,
                             entropy=entropy,
-                            force=True
+                            force=True,
                         )
-                        manager.trainModel(num_epochs=num_epochs, debug=debug)
+                        manager.trainModel(
+                            num_epochs=num_epochs, debug=debug, run_attack=run_attack
+                        )
 
                         metrics = {
                             "dataset": dataset,
@@ -601,6 +622,7 @@ def testKnockoffTrain(model_arch = "resnet18", dataset="cifar100", gpu=-1, debug
                             f"{traceback.format_exc()}\n\n\n{dict_to_str(metrics)}",
                         )
     logger.close()
+
 
 if __name__ == "__main__":
     ans = input(

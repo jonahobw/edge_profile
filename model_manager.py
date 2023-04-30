@@ -11,11 +11,12 @@ from pathlib import Path
 import random
 import sys
 import time
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple, Union
 from abc import ABC, abstractmethod
 
 import torch
 from torch.nn.utils import prune
+from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
 from cleverhans.torch.attacks.projected_gradient_descent import (
@@ -119,6 +120,7 @@ class ModelManagerBase(ABC):
             "val_acc1",
             "val_acc5",
             "lr",
+            "attack_success",
         ]
 
     def constructModel(
@@ -236,6 +238,7 @@ class ModelManagerBase(ABC):
         debug: int = None,
         patience: int = 10,
         replace: bool = False,
+        run_attack: bool = False,
     ):
         """Trains the model using dataset self.dataset.
 
@@ -288,6 +291,7 @@ class ModelManagerBase(ABC):
                     loss_fn=loss_func,
                     lr_scheduler=lr_scheduler,
                     debug=debug,
+                    run_attack = run_attack,
                 )
 
                 self.epochs_trained += 1
@@ -324,7 +328,9 @@ class ModelManagerBase(ABC):
         loss_fn: Callable,
         lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
         debug: int = None,
+        run_attack: bool = False,
     ):
+        # todo implement run_attack like it is implemented for surrogate models
         loss, acc1, acc5 = self.runEpoch(
             train=True,
             epoch=epoch_num,
@@ -1453,6 +1459,7 @@ class SurrogateModelManager(ModelManagerBase):
                 "train_agreement",
                 "val_agreement",
                 "l1_weight_bound",
+                "transfer_attack_success",
             ]
         )
         self.knockoff_transfer_set = None
@@ -1518,6 +1525,7 @@ class SurrogateModelManager(ModelManagerBase):
         loss_fn: Callable,
         lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
         debug: int = None,
+        run_attack: bool = True,
     ):
         loss, acc1, acc5, agreement = self.runEpoch(
             train=True,
@@ -1538,6 +1546,13 @@ class SurrogateModelManager(ModelManagerBase):
 
         l1_weight_bound = self.getL1WeightNorm(self.victim_model)
 
+        transfer_attack_success = -1
+        if run_attack:
+            # run transfer on victim validation data
+            results = self.transferAttackPGD(self.victim_model.dataset, dataloader_name="val_dl", debug=debug)
+            transfer_attack_success = 1 - results["victim_correct1"]
+        
+
         metrics = {
             "train_loss": loss,
             "train_acc1": acc1,
@@ -1549,6 +1564,7 @@ class SurrogateModelManager(ModelManagerBase):
             "train_agreement": agreement,
             "val_agreement": val_agreement,
             "l1_weight_bound": l1_weight_bound,
+            "transfer_attack_success": transfer_attack_success,
         }
         return metrics
 
@@ -1635,18 +1651,22 @@ class SurrogateModelManager(ModelManagerBase):
 
     def transferAttackPGD(
         self,
-        eps: float,
-        step_size: float,
-        iterations: int,
+        dataset: Dataset,
+        dataloader_name: str,
+        eps: float = 8/255,
+        step_size: float = 2/255,
+        iterations: int = 10,
         norm=np.inf,
-        train_data: bool = False,
         debug: int = None,
-    ):
+    ) -> Dict[str, Union[float, int]]:
         """
         Run a transfer attack, generating adversarial inputs on 
         surrogate model and applying them to the victim model.
         Code adapted from cleverhans tutorial
         https://github.com/cleverhans-lab/cleverhans/blob/master/tutorials/torch/cifar10_tutorial.py
+        dataset name is the name of the class attribute of the dataset, 
+        for example "train_dl" corresponds to dataset.train_dl, 
+        see datasets.Dataset class
         """
         topk = (1, 5)
 
@@ -1655,12 +1675,6 @@ class SurrogateModelManager(ModelManagerBase):
         self.model.to(self.device)
         self.victim_model.model.to(self.device)
         self.victim_model.model.eval()
-
-        data = "train"
-        dl = self.dataset.train_dl
-        if not train_data:
-            data = "val"
-            dl = self.dataset.val_dl
 
         results = {
             "inputs_tested": 0,
@@ -1677,8 +1691,9 @@ class SurrogateModelManager(ModelManagerBase):
         victim_acc1 = OnlineStats()
         victim_acc5 = OnlineStats()
 
+        dl = getattr(dataset, dataloader_name)
         epoch_iter = tqdm(dl)
-        epoch_iter.set_description(f"PGD Transfer attack on {data} dataset")
+        epoch_iter.set_description(f"Running PGD Transfer attack from {self} to {self.victim_model}")
 
         for i, (x, y) in enumerate(epoch_iter, start=1):
             x, y = x.to(self.device), y.to(self.device)
@@ -1698,6 +1713,9 @@ class SurrogateModelManager(ModelManagerBase):
             surrogate_acc5.add(adv_c5_surrogate / dl.batch_size)
 
             adv_c1_victim, adv_c5_victim = correct(y_pred_victim, y, topk)
+            # if the attack is successful, then these values should be both
+            # (1) low values, meaning low accuracy on the adversarial images
+            # and (2) similar values to the surrogate values
             results["victim_correct1"] += adv_c1_victim
             results["victim_correct5"] += adv_c5_victim
             victim_acc1.add(adv_c1_victim / dl.batch_size)
@@ -1741,16 +1759,18 @@ class SurrogateModelManager(ModelManagerBase):
             "eps": eps,
             "step_size": step_size,
             "iterations": iterations,
-            "data": data,
+            "dataset": dataset.name,
+            "dataloader": dataloader_name,
         }
 
         print(json.dumps(results, indent=4))
         if debug is None:
             if "transfer_results" not in self.config:
-                self.config["transfer_results"] = {f"{data}_results": results}
+                self.config["transfer_results"] = {f"{dataset.name}_results": results}
             else:
-                self.config["transfer_results"][f"{data}_results"] = results
+                self.config["transfer_results"][f"{dataset.name}_results"] = results
             self.saveConfig()
+        return results
 
     def loadVictim(self, victim_model_path: str, gpu: int):
         victim_folder = Path(victim_model_path).parent
