@@ -19,7 +19,7 @@ class CSVLogger:
         """
         if name is None:
             name = "logs.csv"
-            assert name.endswith(".csv")
+        assert name.endswith(".csv")
         file = folder / name
         print(f"Logging results to {file}")
         file_existed = file.exists()

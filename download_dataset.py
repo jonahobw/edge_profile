@@ -1,9 +1,10 @@
 """Downloads a dataset to <current working dir>/datasets/<name>"""
 
 from argparse import ArgumentParser
-
 import requests, zipfile, io, shutil
 from pathlib import Path
+
+from tqdm import tqdm
 from torchvision import datasets
 from torchvision.datasets import ImageFolder
 
@@ -21,6 +22,24 @@ download_path = Path.cwd() / "datasets"
 if not download_path.exists():
     download_path.mkdir(parents=True, exist_ok=True)
 
+def download(url: str, fname: str, chunk_size=1024):
+    if not isinstance(fname, str):
+        fname = str(fname)
+    resp = requests.get(url, stream=True)
+    total = int(resp.headers.get('content-length', 0))
+    with open(fname, 'wb') as file, tqdm(
+        desc=fname,
+        total=total,
+        unit='iB',
+        unit_scale=True,
+        unit_divisor=1024,
+    ) as bar:
+        for data in resp.iter_content(chunk_size=chunk_size):
+            size = file.write(data)
+            bar.update(size)
+    assert resp.status_code == 200, f"Download failed with status code {resp.status_code}."
+    return resp
+
 def downloadDataset(dataset_name):
     if dataset_name not in supported_datasets:
         raise ValueError(f"{dataset_name} not supported.  Supported datasets are {supported_datasets}.")
@@ -29,15 +48,17 @@ def downloadDataset(dataset_name):
     if dataset_name in torchvision_datasets:
         torchvision_datasets[dataset_name](root=dataset_path, download=True)
     if dataset_name == "tiny-imagenet-200":
-        download = requests.get("http://cs231n.stanford.edu/tiny-imagenet-200.zip", stream=True)
-        if download.status_code != 200:  # http 200 means success
-            raise RuntimeError(f"Download failed with status code {download.status_code}.")
-        z = zipfile.ZipFile(io.BytesIO(download.content))
+        file = download_path / "tiny-imagenet-200.zip"
+        if not file.exists():
+            download("http://cs231n.stanford.edu/tiny-imagenet-200.zip", fname=download_path / "tiny-imagenet-200.zip")
+        z = zipfile.ZipFile(file)
         z.extractall(dataset_path.parent)
+        Path(file).unlink()
 
         # format the image folder from /class/images/n01443537_0.JPEG
         # to get rid of images folder, resulting in /class/n01443537_0.JPEG
-        for class_folder in (dataset_path / "train").glob("*"):
+        print("Formatting training data ...")
+        for class_folder in tqdm((dataset_path / "train").glob("*")):
             if not class_folder.is_dir():
                 class_folder.unlink()
             # text_files = [x for x in class_folder.glob("*.txt")]
@@ -45,7 +66,7 @@ def downloadDataset(dataset_name):
             #     text_file.unlink()
             img_folder = class_folder / "images"
             if img_folder.exists():
-                for img in img_folder.glob("*"):
+                for img in img_folder.glob("*JPEG"):
                     img.rename(dataset_path/ "train" / class_folder.name / img.name)
                 shutil.rmtree(img_folder)
         
@@ -62,7 +83,8 @@ def downloadDataset(dataset_name):
             
         # Create subfolders (if not present) for validation images based on label,
         # and move images into the respective folders
-        for img, folder in file_to_label.items():
+        print("Formatting validation data ...")
+        for img, folder in tqdm(file_to_label.items()):
             img_file = val_folder / "images" / img
             newpath = val_folder / folder
             newpath.mkdir(exist_ok=True)

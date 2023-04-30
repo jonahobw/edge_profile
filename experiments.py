@@ -541,7 +541,8 @@ def testKnockoffTrain(model_arch = "resnet18", dataset="cifar100", gpu=-1, debug
         "val_agreement",
         "l1_weight_bound",
     ]
-    logger = CSVLogger(Path.cwd(), columns, name="test_knockoff_train.csv")
+    log_path = Path.cwd() / f"test_knockoff_train_{dataset}.csv"
+    logger = CSVLogger(log_path.parent, columns, name=log_path.name, append=log_path.exists())
     pretrained = False  # todo fix number of classes
 
     for transfer_size in [10000, 50000]:

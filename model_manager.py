@@ -1008,44 +1008,50 @@ class VictimModelManager(ProfiledModelManager):
             samples_sum = sum(class_influence)
             multinomial_dist = [x / samples_sum for x in class_influence]
             config["class_importance"] = multinomial_dist
-            samples_per_class = np.random.multinomial(
-                transfer_size - (sample_avg * num_classes), multinomial_dist
-            ).tolist()
-            samples_per_class = [
-                samples_per_class[i] + sample_avg for i in range(num_classes)
-            ]
-            # check to see if we sampled some classes more than we have data for
-            overflow_samples = 0
-            unsaturated_classes = [0 for _ in range(num_classes)]
-            for class_idx in range(num_classes):
-                if len(samples[class_idx]) < samples_per_class[class_idx]:
-                    diff = samples_per_class[class_idx] - len(samples[class_idx])
-                    samples_per_class[class_idx] -= diff
-                    overflow_samples += diff
-                else:
-                    unsaturated_classes[class_idx] += (
-                        len(samples[class_idx]) - samples_per_class[class_idx]
-                    )
-            # sample overflows randomly
-            for x in range(overflow_samples):
-                # normalize unsaturated classes
-                unsaturated_classes_norm = [
-                    x / sum(unsaturated_classes) for x in unsaturated_classes
-                ]
-                # choose from unsaturated classes
-                class_idx = np.random.multinomial(1, unsaturated_classes_norm)[0]
-                unsaturated_classes[class_idx] -= 1
-                samples_per_class[class_idx] += 1
-            config["samples_per_class"] = samples_per_class
+            
+            # check to see if the requested transfer size is all of the data
+            if len(dataset) == transfer_size:
+                config["samples_per_class"] = [len(dataset) / num_classes for x in range(num_classes)]
+                sample_indices = samples
 
-            # now generate samples per class and add them to a main list
-            print("Sampling classes and writing to file ...")
-            sample_indices = []
-            for class_idx, num_samples in enumerate(samples_per_class):
-                sample_indices.extend(random.sample(samples[class_idx], num_samples))
+            else:   # need to randomly sample according to class importances
+                samples_per_class = np.random.multinomial(
+                    transfer_size - (sample_avg * num_classes), multinomial_dist
+                ).tolist()
+                samples_per_class = [
+                    samples_per_class[i] + sample_avg for i in range(num_classes)
+                ]
+                # check to see if we sampled some classes more than we have data for
+                overflow_samples = 0
+                unsaturated_classes = [0 for _ in range(num_classes)]
+                for class_idx in range(num_classes):
+                    if len(samples[class_idx]) < samples_per_class[class_idx]:
+                        diff = samples_per_class[class_idx] - len(samples[class_idx])
+                        samples_per_class[class_idx] -= diff
+                        overflow_samples += diff
+                    else:
+                        unsaturated_classes[class_idx] += (
+                            len(samples[class_idx]) - samples_per_class[class_idx]
+                        )
+                # sample overflows randomly
+                for _ in range(overflow_samples):
+                    # normalize unsaturated classes
+                    unsaturated_classes_norm = [
+                        x / sum(unsaturated_classes) for x in unsaturated_classes
+                    ]
+                    # choose from unsaturated classes
+                    class_idx = np.random.multinomial(1, unsaturated_classes_norm).argmax()
+                    unsaturated_classes[class_idx] -= 1
+                    samples_per_class[class_idx] += 1
+                config["samples_per_class"] = samples_per_class
+
+                # now generate samples per class and add them to a main list
+                print("Sampling classes and writing to file ...")
+                sample_indices = []
+                for class_idx, num_samples in enumerate(samples_per_class):
+                    sample_indices.extend(random.sample(samples[class_idx], num_samples))
 
         config["sample_indices"] = sample_indices
-
         transfer_folder = self.path / "transfer_sets"
         transfer_folder.mkdir(exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
