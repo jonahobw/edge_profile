@@ -34,7 +34,7 @@ from logger import CSVLogger
 from online import OnlineStats
 from model_metrics import correct, accuracy, both_correct
 from collect_profiles import run_command, generateExeName
-from utils import latest_file, latestFileFromList
+from utils import latest_file, latestFileFromList, checkDict
 from format_profiles import parse_one_profile, avgProfiles
 from architecture_prediction import ArchPredBase
 
@@ -217,10 +217,30 @@ class ModelManagerBase(ABC):
     @staticmethod
     def loadConfig(path: Path) -> dict:
         """
-        Given a path to a model manager folder, return its config file as a dict
+        Given a path to a model manager folder, return its config file as a dict.
         path is not hardcoded as self.path so that this method can be called
         by inheriting classes before self.path is set (which occurs when invoking
         this class's constructor).
+        """
+        config_files = list(path.glob("params_*"))
+        if len(config_files) != 1:
+            raise ValueError(
+                f"""There are {len(config_files)} config files in path {path}\n
+                There should only be one or you are calling loadConfig() with the
+                wrong path. The function should be called with a path to the 
+                model manager folder."""
+            )
+        with open(config_files[0], "r") as f:
+            conf = json.load(f)
+        return conf
+    
+    @staticmethod
+    def saveConfigFast(path: Path, args: dict, replace: bool = False):
+        """
+        Given a path to a model manager folder and config arguments, 
+        save the arguments in the config folder, rewriting existing arguments if 
+        replace is true.  Provided as a static method to allow config
+        alteration without loading modelmanager object.
         """
         config_files = list(path.glob("params_*"))
         if len(config_files) != 1:
@@ -229,7 +249,13 @@ class ModelManagerBase(ABC):
             )
         with open(config_files[0], "r") as f:
             conf = json.load(f)
-        return conf
+        
+        for arg in args:
+            if arg not in conf or replace:
+                conf[arg] = args[arg]
+        
+        with open(config_files[0], "w+") as f:
+            json.dump(conf, f, indent=4)
 
     def trainModel(
         self,
@@ -473,12 +499,12 @@ class ModelManagerBase(ABC):
         if not isinstance(other.model, type(self.model)):
             raise ValueError
             # return float("inf")
-        return sum(
-            (x - y).abs().sum()
-            for x, y in zip(
-                self.model.state_dict().values(), other.model.state_dict().values()
-            )
-        ).item()
+        
+        l1_norm = 0.0
+        for x, y in zip(self.model.state_dict().values(), other.model.state_dict().values()):
+            if x.shape == y.shape:
+                l1_norm += (x - y).abs().sum().item()
+        return l1_norm
 
     def __repr__(self) -> str:
         return str(self.path.relative_to(Path.cwd()))
@@ -794,7 +820,7 @@ class VictimModelManager(ProfiledModelManager):
         return model_folder
 
     @staticmethod
-    def getModelPaths(prefix: str = None) -> List[Path]:
+    def getModelPaths(prefix: str = None, architectures: List[str] = None) -> List[Path]:
         """
         Return a list of paths to all victim models
         in directory "./<prefix>".  This directory must be organized
@@ -809,6 +835,8 @@ class VictimModelManager(ProfiledModelManager):
         arch_folders = [i for i in models_folder.glob("*") if i.is_dir()]
         model_paths = []
         for arch in arch_folders:
+            if architectures is not None and arch.name not in architectures:
+                continue
             for model_folder in [i for i in arch.glob("*") if i.is_dir()]:
                 victim_path = (
                     models_folder
@@ -1018,7 +1046,7 @@ class VictimModelManager(ProfiledModelManager):
             # check to see if the requested transfer size is all of the data
             if len(dataset) == transfer_size:
                 config["samples_per_class"] = [len(dataset) // num_classes for x in range(num_classes)]
-                sample_indices = dataset.indices
+                sample_indices = list(range(len(dataset)))
 
             else:   # need to randomly sample according to class importances
                 samples_per_class = np.random.multinomial(
@@ -1129,7 +1157,7 @@ class VictimModelManager(ProfiledModelManager):
             raise FileNotFoundError(
                 f"""No transfer sets found in {transfer_folder} matching configuration\n
                 {json.dumps(config, indent=4)}\nCall generateKnockoffTransferSet to make
-                 one or set force=True."""
+                 one or set force=True to automatically generate one."""
             )
 
         # only need to add indices for the training data
@@ -1436,7 +1464,7 @@ class SurrogateModelManager(ModelManagerBase):
             gpu=gpu,
             save_model=save_model,
         )
-        self.model = self.constructModel(pretrained=self.pretrained)
+        self.model = self.constructModel(pretrained=self.pretrained and load_path is None)
         if load_path is not None:
             self.loadModel(load_path)
             # this causes stored parameters to overwrite new ones
@@ -1511,12 +1539,20 @@ class SurrogateModelManager(ModelManagerBase):
             architecture=conf["architecture"],
             arch_conf=conf,
             arch_pred_model_name=conf["arch_pred_model_name"],
-            pretrained=False,
+            pretrained=conf["pretrained"],
             load_path=model_path,
             gpu=gpu,
         )
         print(f"Loaded surrogate model\n{model_path}\n")
         return surrogate_manager
+
+    @staticmethod
+    def loadVictimConfig(path: Path) -> dict:
+        """
+        Given a path to a surrogate model manager folder,
+        load and return the associated victim model's config.
+        """
+        return VictimModelManager.loadConfig(path.parent)
 
     def collectEpochMetrics(
         self,
@@ -1779,6 +1815,133 @@ class SurrogateModelManager(ModelManagerBase):
         if victim_folder.name == QuantizedModelManager.FOLDER_NAME:
             return QuantizedModelManager.load(model_path=victim_model_path, gpu=gpu)
         return VictimModelManager.load(model_path=victim_model_path, gpu=gpu)
+
+
+
+def getVictimSurrogateModels(
+    architectures: List[str] = None,
+    victim_args: dict = {},
+    surrogate_args: dict = {},
+) -> Dict[Path, List[Path]]:
+    """
+    Given args for victim and surrogate models, return a
+    dictionary of {victim_model_path: [paths of surrogate models associated
+    with this victim model]}.
+
+    Only the victim and surrogate models whose args match those
+    provided will be returned.
+    """         
+
+    def validManager(
+        victim_path: Path,
+    ) -> Dict[VictimModelManager, List[SurrogateModelManager]]:
+        """
+        Given a path to a victim model manger object, determine if
+        its configuration matches the provided args and if it has a surrogate
+        model that matches the provided args.
+
+        Returns [(path to victim, path to surrogate)] if config matches
+        and [] if not.
+        """
+        vict_config = VictimModelManager.loadConfig(victim_path.parent)
+        # check victim
+        if not checkDict(vict_config, victim_args):
+            return {}
+        result = {vict_path: []}
+        # check surrogate
+        surrogate_paths = list(vict_path.parent.glob(f"{SurrogateModelManager.FOLDER_NAME}*"))
+        for surrogate_path in surrogate_paths:
+            surrogate_config = SurrogateModelManager.loadConfig(surrogate_path)
+            if checkDict(surrogate_config, surrogate_args):
+                result[vict_path].append(
+                    surrogate_path / SurrogateModelManager.MODEL_FILENAME
+                )
+
+        return result
+
+    victim_paths = VictimModelManager.getModelPaths(architectures=architectures)
+    result = {}
+    for vict_path in victim_paths:
+        result.update(validManager(victim_path=vict_path))
+    return result
+
+
+def getModelsFromSurrogateTrainStrategies(strategies: dict, architectures: List[str]) -> Dict[str, Dict[str, Path]]:
+    """
+    architectures is a list of DNN architecture strings, like config.MODELS
+
+    The strategies input is keyed by an arbitrary name given to a surrogate model
+    training strategy.  The value associated with that key is dict of arguments
+    to be matched with the surrogate model's config. Notable elements are:
+        knockoff_transfer_set - will be None for pure knowledge distillation 
+            training, otherwise is a dict specifying the arguments: dataset, 
+            transfer_size, sample_avg, random_policy, and entropy.
+        pretrained - boolean
+
+    an example of the strategies input would be:
+    {
+        "knowledge_dist" : {
+            "pretrained": False,
+            "knockoff_transfer_set": None,
+        },
+        "knowledge_dist_pretrained" : {
+            "pretrained": True,
+            "knockoff_transfer_set": None,
+        },
+        "knockoff1" : {
+            "pretrained": False,
+            "knockoff_transfer_set": {
+                "dataset_name": "cifar100",
+                "transfer_size": 20000,
+                "sample_avg": 100,
+                "random_policy": False,
+                "entropy": False,
+            },
+        },
+    }
+
+    The return value of this function is a dict with the same keys as
+    the strategies input.  The value for a key is another dict keyed by model
+    architecture (only including the provided architectures).  The values are a path to 
+    a surrogate model which matches the args to the surrogate model training
+    strategy. An error is raised if there is not a valid surrogate model for any
+    of the provided architectures.
+
+    For example, if the input is the strategies example as above, and the 
+    architectures input is ["resnet18", "googlenet"] then the output would be
+    {
+        "knowledge_dist" : {
+            "resnet18": <path to resnet18 surrogate model satisfying knowledge_dist>,
+            "googlenet": <path to googlenet surrogate model satisfying knowledge_dist>,
+        },
+        "knowledge_dist_pretrained" : {
+            "resnet18": <path to resnet18 surrogate model satisfying knowledge_dist_pretrained>,
+            "googlenet": <path to googlenet surrogate model satisfying knowledge_dist_pretrained>,
+        },
+        "knockoff1" : {
+            "resnet18": <path to resnet18 surrogate model satisfying knockoff1>,
+            "googlenet": <path to googlenet surrogate model satisfying knockoff1>,
+        },
+    }
+    """
+    result = {}
+    for strategy in strategies:
+        strategy_result = {}
+        # this will include models from all architectures, and 
+        # is formatted as {path to victim manager: [list of surrogate paths]}
+        # we only want 1 surrogate path
+        models_satisfying_strategy = getVictimSurrogateModels(surrogate_args=strategies[strategy], architectures=architectures)
+        for arch in architectures:
+            found = False
+            for vict_path in models_satisfying_strategy:
+                if str(vict_path).find(arch) >= 0:
+                    found = True
+                    assert len(models_satisfying_strategy[vict_path]) > 0, f"Could not find any surrogate models with arch {arch} and strategy {strategies[strategy]}"
+                    strategy_result[arch] = models_satisfying_strategy[vict_path][0]
+                    break
+            assert found, f"Could not find any surrogate models with arch {arch} and strategy {strategies[strategy]}"
+        result[strategy] = strategy_result
+    return result
 
 
 if __name__ == "__main__":

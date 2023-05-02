@@ -477,58 +477,6 @@ def predictVictimArchs(
     return predictions
 
 
-def getVictimSurrogateModels(
-    victim_args: dict = {},
-    surrogate_args: dict = {},
-) -> Dict[VictimModelManager, List[SurrogateModelManager]]:
-    """
-    Given args for victim and surrogate models, return a
-    dictionary of {victim_model_path: [surrogate models associated
-    with this victim model]}.
-
-    Only the victim and surrogate models whose args match those
-    provided will be returned.
-    """
-
-    def validManager(
-        victim_path: Path,
-    ) -> Dict[VictimModelManager, List[SurrogateModelManager]]:
-        """
-        Given a path to a victim model manger object, determine if
-        its configuration matches the provided args and if it has a surrogate
-        model that matches the provided args.
-
-        Returns [(path to victim, path to surrogate)] if config matches
-        and [] if not.
-        """
-        manager = VictimModelManager.loadConfig(victim_path.parent)
-        # check victim
-        for arg in victim_args:
-            if manager.config[arg] != victim_args[arg]:
-                return {}
-        result = {vict_path: []}
-        # check surrogate
-        surrogate_paths = [
-            x for x in vict_path.parent.glob(f"{SurrogateModelManager.FOLDER_NAME}*")
-        ]
-        for surrogate_path in surrogate_paths:
-            surrogate_manager = SurrogateModelManager.loadConfig(surrogate_path)
-            for arg in surrogate_args:
-                if surrogate_manager.config[arg] != surrogate_args[arg]:
-                    break
-            result[vict_path].append(
-                surrogate_path / SurrogateModelManager.MODEL_FILENAME
-            )
-
-        return result
-
-    victim_paths = VictimModelManager.getModelPaths()
-    result = {}
-    for vict_path in victim_paths:
-        result.update(validManager(victim_path=vict_path))
-    return result
-
-
 def testKnockoffTrain(
     model_arch="resnet18",
     dataset="cifar100",
@@ -575,7 +523,7 @@ def testKnockoffTrain(
                             architecture=model_arch,
                             arch_conf=1.0,
                             arch_pred_model_name="rf",
-                            pretrained=pretrained,
+                            pretrained=True,
                             gpu=gpu,
                         )
                         manager.loadKnockoffTransferSet(

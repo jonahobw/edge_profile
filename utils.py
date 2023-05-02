@@ -44,3 +44,19 @@ def dict_to_str(dictionary, indent: int = 4) -> str:
             pass
         return f"JSON Parse Error for Object of type: {type(x)}"
     return json.dumps(dictionary, indent=indent, default=default)
+
+
+def checkDict(config: dict, args_dict: dict) ->bool:
+    """
+    Recursive function for checking that arguments in
+    a dictionary match a config. supports multilevel dicts.
+    """
+    for arg in args_dict:
+        if arg not in config:
+            return False
+        elif isinstance(args_dict[arg], dict):
+            if not isinstance(config[arg], dict) or not checkDict(config[arg], args_dict[arg]):
+                return False
+        elif args_dict[arg] != config[arg]:
+            return False
+    return True

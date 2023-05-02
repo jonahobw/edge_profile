@@ -11,7 +11,7 @@ import sys
 # setting path
 sys.path.append('../edge_profile')
 
-from model_manager import VictimModelManager
+from model_manager import VictimModelManager, SurrogateModelManager, getVictimSurrogateModels
 
 def addConfig(args: dict):
     """For each model, add <args> to its configuration"""
@@ -30,6 +30,17 @@ def addProfileConfig(args: dict, filters: dict = {}):
             with open(config_file, 'w') as f:
                 json.dump(conf, f, indent=4)
 
+def addSurrogateConfig(args: dict, replace: bool = False):
+    """
+    For each surrogate model, add <args> to its configuration.
+    Replace arguments in the config file only if replace = True
+    """
+    vict_to_surrogate = getVictimSurrogateModels()
+    for vict_path in vict_to_surrogate:
+        for surrogate_path in vict_to_surrogate[vict_path]:
+            SurrogateModelManager.saveConfigFast(surrogate_path.parent, args=args, replace=replace)
+
 if __name__ == '__main__':
     # addConfig({"pretrained": False})
-    addProfileConfig({"gpu_type": "quadro_rtx_8000"})
+    #addProfileConfig({"gpu_type": "quadro_rtx_8000"})
+    addSurrogateConfig({"knockoff_transfer_set": None})

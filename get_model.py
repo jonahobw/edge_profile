@@ -131,10 +131,51 @@ def get_quantized_model(model_arch: str, kwargs={}):
     return None
 
 
-def fixLastLayer(model: torch.nn.Module, architecture: str, num_classes: int) -> bool:
-    # TODO implement finetuning changing the last layer see here
+def fixLastLayer(model: torch.nn.Module, architecture: str, num_classes: int, finetune: bool = False) -> bool:
+    # implements finetuning changing the last layer see here
     # https://pytorch.org/tutorials/beginner/finetuning_torchvision_models_tutorial.html
-    supported_models = []   #["mnasnet1_3"]
+    print(f"Setting number of classes for {architecture} to {num_classes} ...")
+    if finetune:
+        for param in model.parameters():
+            param.requires_grad = False
+
+    supported_models = all_models   #["mnasnet1_3"]
     if architecture not in supported_models:
         return False
-    return True
+    family = name_to_family[architecture]
+    if architecture == "alexnet":
+        model.classifier[6] = torch.nn.Linear(4096, num_classes)
+        return True
+    if architecture in ['resnet18', 'resnet34']:
+        model.fc = torch.nn.Linear(512, num_classes)
+        return True
+    if architecture in ['resnet50', 'resnet101', 'resnet152''resnext50_32x4d', 'resnext101_32x8d','wide_resnet50_2', 'wide_resnet101_2']:
+        model.fc = torch.nn.Linear(2048, num_classes)
+        return True
+    if family == "vgg":
+        model.classifier[6] = torch.nn.Linear(4096, num_classes)
+        return True
+    if family == "squeezenet":
+        model.classifier[1] = torch.nn.Conv2d(512, num_classes, kernel_size=1)
+        return True
+    if family == "densenet":
+        in_features = model.classifier.in_features
+        model.classifier = torch.nn.Linear(in_features, num_classes)
+        return True
+    if architecture == "googlenet":
+        model.fc = torch.nn.Linear(1024, num_classes)
+        return True
+    if architecture == 'mobilenet_v2':
+        model.classifier[1] = torch.nn.Linear(model.last_channel, num_classes)
+        return True
+    if architecture in ["mobilenet_v3_large", "mobilenet_v3_small"]:
+        in_features = model.classifier[0].out_features
+        model.classifier[3] = torch.nn.Linear(in_features, num_classes)
+        return True
+    if family == "mnasnet":
+        model.classifier[1] = torch.nn.Linear(1280, num_classes)
+        return True
+    if family == "shufflenet":
+        model.fc = torch.nn.Linear(model._stage_out_channels[-1], num_classes)
+        return True
+    return False
