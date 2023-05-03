@@ -6,7 +6,7 @@ from typing import List, Dict
 import json
 import shutil
 
-from get_model import all_models, quantized_models, name_to_family
+from get_model import all_models, quantized_models, name_to_family, getModelParams
 import config
 from model_manager import (
     VictimModelManager,
@@ -507,9 +507,7 @@ def testKnockoffTrain(
     log_path = Path.cwd() / f"test_knockoff_train_{dataset}.csv"
     # todo if you add a new column but use append mode then the new column
     # will be dropped, so set append = False
-    logger = CSVLogger(
-        log_path.parent, columns, name=log_path.name, append=False
-    )
+    logger = CSVLogger(log_path.parent, columns, name=log_path.name, append=False)
     pretrained = False  # todo fix number of classes
 
     for transfer_size in [10000, 50000]:
@@ -580,6 +578,83 @@ def testKnockoffTrain(
     logger.close()
 
 
+def trainKnockoffSurrogateModels(
+    dataset: str,
+    transfer_size: int,
+    sample_avg: int,
+    random_policy: bool,
+    entropy: bool,
+    pretrained: bool,
+    epochs: List[int],
+    patience: List[int],
+    lr: List[float],
+    run_attack: bool,
+    gpu=0,
+    reverse=False,
+    debug=None,
+    save_model: bool = True,
+    model_paths: List[Path] = None,
+):
+    """
+    Epochs, patience, and lr are lists of the same length
+    specifying training in stages. the lr list is a factor
+    times the default lr.  So if default is 0.1 and lr =
+    [1, 0.5], then the lr will be 0.1*1 in the first stage
+    and 0.1 * 0.5 in the second stage.
+    """
+    if model_paths is None:
+        model_paths = VictimModelManager.getModelPaths()
+    if reverse:
+        model_paths.reverse()
+    start = time.time()
+
+    for i, victim_path in enumerate(model_paths):
+        iter_start = time.time()
+        architecture = victim_path.parent.parent.name
+        try:
+            surrogate_model = SurrogateModelManager(
+                victim_model_path=victim_path,
+                architecture=architecture,
+                arch_conf=-1,
+                arch_pred_model_name=f"knockoff_{architecture}",
+                gpu=gpu,
+                save_model=save_model,
+                pretrained=pretrained,
+            )
+            surrogate_model.loadKnockoffTransferSet(
+                dataset_name=dataset,
+                transfer_size=transfer_size,
+                sample_avg=sample_avg,
+                random_policy=random_policy,
+                entropy=entropy,
+                force=True,
+            )
+            for i in range(len(epochs)):
+                default_lr = getModelParams(architecture).get("lr", 0.1)
+                surrogate_model.trainModel(
+                    num_epochs=epochs[i],
+                    patience=patience[i],
+                    debug=debug,
+                    lr=default_lr * lr[i],
+                    run_attack=True,
+                    replace=True,
+                )
+            config.EMAIL.email_update(
+                start=start,
+                iter_start=iter_start,
+                iter=i,
+                total_iters=len(model_paths),
+                subject=f"Surrogate Model {architecture} Finished Training",
+                params=surrogate_model.config,
+            )
+        except Exception as e:
+            print(e)
+            config.EMAIL.email(
+                f"Failed Training Surrogate model {architecture}",
+                f"{traceback.format_exc()}",
+            )
+
+
 if __name__ == "__main__":
     ans = input(
         "You are running the experiments file.  Enter yes to continue, anything else to exit."
@@ -587,7 +662,20 @@ if __name__ == "__main__":
     if not ans.lower() == "yes":
         exit(0)
 
-    testKnockoffTrain(dataset="cifar100", gpu=-1, debug=1)
+    # testKnockoffTrain(dataset="cifar100", gpu=-1, debug=1)
     # testKnockoffTrain(dataset="cifar100", gpu=0)
     # testKnockoffTrain(dataset="tiny-imagenet-200", gpu=1)
+    trainKnockoffSurrogateModels(
+        dataset="cifar100",
+        transfer_size=40000,
+        sample_avg=50,
+        random_policy=False,
+        entropy=True,
+        pretrained=True,
+        epochs=[20, 20, 10],
+        patience=[7, 7, 3],
+        lr=[1, 0.1, 0.01],
+        run_attack=True,
+        gpu=-0,
+    )
     exit(0)

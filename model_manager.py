@@ -22,6 +22,7 @@ from tqdm import tqdm
 from cleverhans.torch.attacks.projected_gradient_descent import (
     projected_gradient_descent,
 )
+import pandas as pd
 
 from get_model import (
     get_model,
@@ -233,12 +234,18 @@ class ModelManagerBase(ABC):
         with open(config_files[0], "r") as f:
             conf = json.load(f)
         return conf
-    
+
+    @staticmethod
+    def loadTrainLog(path: Path) -> pd.DataFrame:
+        train_logfile = path / "logs.csv"
+        assert train_logfile.exists()
+        return pd.read_csv(train_logfile)
+
     @staticmethod
     def saveConfigFast(path: Path, args: dict, replace: bool = False):
         """
-        Given a path to a model manager folder and config arguments, 
-        save the arguments in the config folder, rewriting existing arguments if 
+        Given a path to a model manager folder and config arguments,
+        save the arguments in the config folder, rewriting existing arguments if
         replace is true.  Provided as a static method to allow config
         alteration without loading modelmanager object.
         """
@@ -249,11 +256,11 @@ class ModelManagerBase(ABC):
             )
         with open(config_files[0], "r") as f:
             conf = json.load(f)
-        
+
         for arg in args:
             if arg not in conf or replace:
                 conf[arg] = args[arg]
-        
+
         with open(config_files[0], "w+") as f:
             json.dump(conf, f, indent=4)
 
@@ -317,12 +324,12 @@ class ModelManagerBase(ABC):
                     loss_fn=loss_func,
                     lr_scheduler=lr_scheduler,
                     debug=debug,
-                    run_attack = run_attack,
+                    run_attack=run_attack,
                 )
 
                 self.epochs_trained += 1
                 if self.save_model:
-                    # we only write to the log file once the model is saved, 
+                    # we only write to the log file once the model is saved,
                     # see below after self.saveModel()
                     logger.futureWrite(
                         {
@@ -342,7 +349,8 @@ class ModelManagerBase(ABC):
             logger.flush()  # this saves all the futureWrite() calls
             logger.close()
         self.config["epochs_trained"] = self.epochs_trained
-        self.config["initialLR"] = lr
+        if "initialLR" not in self.config:
+            self.config["initialLR"] = lr
         self.config["finalLR"] = optim.param_groups[0]["lr"]
         self.config.update(metrics)
         self.saveConfig()
@@ -493,15 +501,17 @@ class ModelManagerBase(ABC):
 
     def getL1WeightNorm(self, other) -> float:
         """
-        Return the sum of elementwise differences between parameters of 
+        Return the sum of elementwise differences between parameters of
         2 models of the same architecture.
         """
         if not isinstance(other.model, type(self.model)):
             raise ValueError
             # return float("inf")
-        
+
         l1_norm = 0.0
-        for x, y in zip(self.model.state_dict().values(), other.model.state_dict().values()):
+        for x, y in zip(
+            self.model.state_dict().values(), other.model.state_dict().values()
+        ):
             if x.shape == y.shape:
                 l1_norm += (x - y).abs().sum().item()
         return l1_norm
@@ -661,9 +671,9 @@ class ProfiledModelManager(ModelManagerBase):
         self, arch_pred_model: ArchPredBase, average: bool = False, filters: dict = None
     ) -> Tuple[str, float]:
         """
-        Given an architecture prediction model, use it to predict the architecture 
+        Given an architecture prediction model, use it to predict the architecture
         of the model associated with this model manager.
-        average: if true, will average the features from all of the profiles on this 
+        average: if true, will average the features from all of the profiles on this
         model and then pass the features to the architecture prediction model.
         filters: a dict and each argument in the dict must match
             the argument from the config file associated with a profile.
@@ -698,7 +708,7 @@ class ProfiledModelManager(ModelManagerBase):
         #    }
         # }
         #
-        # this way there is support for multiple predictions from the 
+        # this way there is support for multiple predictions from the
         # same model type on the same profile
         prof_name = str(profile_csv.name)
         arch_conf = {"pred_arch": arch, "conf": conf}
@@ -737,11 +747,11 @@ class VictimModelManager(ProfiledModelManager):
         Models files are stored in a folder
         ./models/{model_architecture}/{self.name}_{date_time}/
 
-        This includes the model file, a csv documenting training, and a 
+        This includes the model file, a csv documenting training, and a
         config file.
 
         Args:
-            architecture (str): the exact string representation of 
+            architecture (str): the exact string representation of
                 the model architecture. See get_model.py.
             dataset (str): the name of the dataset all lowercase.
             model_name (str): The name of the model, can be anything except
@@ -749,10 +759,10 @@ class VictimModelManager(ProfiledModelManager):
             load (str, optional): If provided, should be the absolute path to
                 the model folder, {cwd}/models/{model_architecture}/{self.name}{date_time}.
                 This will load the model stored there.
-            data_subset_percent (float, optional): If provided, should be the 
+            data_subset_percent (float, optional): If provided, should be the
                 fraction of the dataset to use.  This will be generated determinisitcally.
                 Uses torch.utils.data.random_split (see datasets.py)
-            idx (int): the index into the subset of the dataset.  0 
+            idx (int): the index into the subset of the dataset.  0
                 for victim model and 1 for surrogate.
         """
         path = self.generateFolder(load, architecture, model_name)
@@ -820,7 +830,9 @@ class VictimModelManager(ProfiledModelManager):
         return model_folder
 
     @staticmethod
-    def getModelPaths(prefix: str = None, architectures: List[str] = None) -> List[Path]:
+    def getModelPaths(
+        prefix: str = None, architectures: List[str] = None
+    ) -> List[Path]:
         """
         Return a list of paths to all victim models
         in directory "./<prefix>".  This directory must be organized
@@ -1042,13 +1054,15 @@ class VictimModelManager(ProfiledModelManager):
             samples_sum = sum(class_influence)
             multinomial_dist = [x / samples_sum for x in class_influence]
             config["class_importance"] = multinomial_dist
-            
+
             # check to see if the requested transfer size is all of the data
             if len(dataset) == transfer_size:
-                config["samples_per_class"] = [len(dataset) // num_classes for x in range(num_classes)]
+                config["samples_per_class"] = [
+                    len(dataset) // num_classes for x in range(num_classes)
+                ]
                 sample_indices = list(range(len(dataset)))
 
-            else:   # need to randomly sample according to class importances
+            else:  # need to randomly sample according to class importances
                 samples_per_class = np.random.multinomial(
                     transfer_size - (sample_avg * num_classes), multinomial_dist
                 ).tolist()
@@ -1074,7 +1088,9 @@ class VictimModelManager(ProfiledModelManager):
                         x / sum(unsaturated_classes) for x in unsaturated_classes
                     ]
                     # choose from unsaturated classes
-                    class_idx = np.random.multinomial(1, unsaturated_classes_norm).argmax()
+                    class_idx = np.random.multinomial(
+                        1, unsaturated_classes_norm
+                    ).argmax()
                     unsaturated_classes[class_idx] -= 1
                     samples_per_class[class_idx] += 1
                 config["samples_per_class"] = samples_per_class
@@ -1083,7 +1099,9 @@ class VictimModelManager(ProfiledModelManager):
                 print("Sampling classes and writing to file ...")
                 sample_indices = []
                 for class_idx, num_samples in enumerate(samples_per_class):
-                    sample_indices.extend(random.sample(samples[class_idx], num_samples))
+                    sample_indices.extend(
+                        random.sample(samples[class_idx], num_samples)
+                    )
 
         config["sample_indices"] = sample_indices
         transfer_folder = self.path / "transfer_sets"
@@ -1093,7 +1111,6 @@ class VictimModelManager(ProfiledModelManager):
         with open(save_path, "w+") as f:
             json.dump(config, f, indent=4)
         print("Completed generating the transfer set.")
-        
 
     def loadKnockoffTransferSet(
         self,
@@ -1403,7 +1420,7 @@ class PruneModelManager(ProfiledModelManager):
 
 class SurrogateModelManager(ModelManagerBase):
     """
-    Constructs the surrogate model with a paired victim model, 
+    Constructs the surrogate model with a paired victim model,
     trains using from the labels from victim model.
     """
 
@@ -1464,7 +1481,9 @@ class SurrogateModelManager(ModelManagerBase):
             gpu=gpu,
             save_model=save_model,
         )
-        self.model = self.constructModel(pretrained=self.pretrained and load_path is None)
+        self.model = self.constructModel(
+            pretrained=self.pretrained and load_path is None
+        )
         if load_path is not None:
             self.loadModel(load_path)
             # this causes stored parameters to overwrite new ones
@@ -1513,16 +1532,18 @@ class SurrogateModelManager(ModelManagerBase):
             force=force,
         )
         self.train_with_transfer_set = True
-        self.saveConfig({
-            "knockoff_transfer_set": {
-                "path":  str(self.knockoff_transfer_set[0]),
-                "dataset_name": dataset_name,
-                "transfer_size": transfer_size,
-                "sample_avg": sample_avg,
-                "random_policy": random_policy,
-                "entropy": entropy,
-            },
-        })
+        self.saveConfig(
+            {
+                "knockoff_transfer_set": {
+                    "path": str(self.knockoff_transfer_set[0]),
+                    "dataset_name": dataset_name,
+                    "transfer_size": transfer_size,
+                    "sample_avg": sample_avg,
+                    "random_policy": random_policy,
+                    "entropy": entropy,
+                },
+            }
+        )
 
     @staticmethod
     def load(model_path: str, gpu: int = -1):
@@ -1585,9 +1606,10 @@ class SurrogateModelManager(ModelManagerBase):
         transfer_attack_success = -1
         if run_attack:
             # run transfer on victim validation data
-            results = self.transferAttackPGD(self.victim_model.dataset, dataloader_name="val_dl", debug=debug)
+            results = self.transferAttackPGD(
+                self.victim_model.dataset, dataloader_name="val_dl", debug=debug
+            )
             transfer_attack_success = 1 - results["victim_correct1"]
-        
 
         metrics = {
             "train_loss": loss,
@@ -1689,19 +1711,19 @@ class SurrogateModelManager(ModelManagerBase):
         self,
         dataset: Dataset,
         dataloader_name: str,
-        eps: float = 8/255,
-        step_size: float = 2/255,
+        eps: float = 8 / 255,
+        step_size: float = 2 / 255,
         iterations: int = 10,
         norm=np.inf,
         debug: int = None,
     ) -> Dict[str, Union[float, int]]:
         """
-        Run a transfer attack, generating adversarial inputs on 
+        Run a transfer attack, generating adversarial inputs on
         surrogate model and applying them to the victim model.
         Code adapted from cleverhans tutorial
         https://github.com/cleverhans-lab/cleverhans/blob/master/tutorials/torch/cifar10_tutorial.py
-        dataset name is the name of the class attribute of the dataset, 
-        for example "train_dl" corresponds to dataset.train_dl, 
+        dataset name is the name of the class attribute of the dataset,
+        for example "train_dl" corresponds to dataset.train_dl,
         see datasets.Dataset class
         """
         topk = (1, 5)
@@ -1729,7 +1751,9 @@ class SurrogateModelManager(ModelManagerBase):
 
         dl = getattr(dataset, dataloader_name)
         epoch_iter = tqdm(dl)
-        epoch_iter.set_description(f"Running PGD Transfer attack from {self} to {self.victim_model}")
+        epoch_iter.set_description(
+            f"Running PGD Transfer attack from {self} to {self.victim_model}"
+        )
 
         for i, (x, y) in enumerate(epoch_iter, start=1):
             x, y = x.to(self.device), y.to(self.device)
@@ -1817,7 +1841,6 @@ class SurrogateModelManager(ModelManagerBase):
         return VictimModelManager.load(model_path=victim_model_path, gpu=gpu)
 
 
-
 def getVictimSurrogateModels(
     architectures: List[str] = None,
     victim_args: dict = {},
@@ -1830,7 +1853,7 @@ def getVictimSurrogateModels(
 
     Only the victim and surrogate models whose args match those
     provided will be returned.
-    """         
+    """
 
     def validManager(
         victim_path: Path,
@@ -1849,7 +1872,9 @@ def getVictimSurrogateModels(
             return {}
         result = {vict_path: []}
         # check surrogate
-        surrogate_paths = list(vict_path.parent.glob(f"{SurrogateModelManager.FOLDER_NAME}*"))
+        surrogate_paths = list(
+            vict_path.parent.glob(f"{SurrogateModelManager.FOLDER_NAME}*")
+        )
         for surrogate_path in surrogate_paths:
             surrogate_config = SurrogateModelManager.loadConfig(surrogate_path)
             if checkDict(surrogate_config, surrogate_args):
@@ -1866,15 +1891,17 @@ def getVictimSurrogateModels(
     return result
 
 
-def getModelsFromSurrogateTrainStrategies(strategies: dict, architectures: List[str]) -> Dict[str, Dict[str, Path]]:
+def getModelsFromSurrogateTrainStrategies(
+    strategies: dict, architectures: List[str]
+) -> Dict[str, Dict[str, Path]]:
     """
     architectures is a list of DNN architecture strings, like config.MODELS
 
     The strategies input is keyed by an arbitrary name given to a surrogate model
     training strategy.  The value associated with that key is dict of arguments
     to be matched with the surrogate model's config. Notable elements are:
-        knockoff_transfer_set - will be None for pure knowledge distillation 
-            training, otherwise is a dict specifying the arguments: dataset, 
+        knockoff_transfer_set - will be None for pure knowledge distillation
+            training, otherwise is a dict specifying the arguments: dataset,
             transfer_size, sample_avg, random_policy, and entropy.
         pretrained - boolean
 
@@ -1902,12 +1929,12 @@ def getModelsFromSurrogateTrainStrategies(strategies: dict, architectures: List[
 
     The return value of this function is a dict with the same keys as
     the strategies input.  The value for a key is another dict keyed by model
-    architecture (only including the provided architectures).  The values are a path to 
+    architecture (only including the provided architectures).  The values are a path to
     a surrogate model which matches the args to the surrogate model training
     strategy. An error is raised if there is not a valid surrogate model for any
     of the provided architectures.
 
-    For example, if the input is the strategies example as above, and the 
+    For example, if the input is the strategies example as above, and the
     architectures input is ["resnet18", "googlenet"] then the output would be
     {
         "knowledge_dist" : {
@@ -1927,19 +1954,25 @@ def getModelsFromSurrogateTrainStrategies(strategies: dict, architectures: List[
     result = {}
     for strategy in strategies:
         strategy_result = {}
-        # this will include models from all architectures, and 
+        # this will include models from all architectures, and
         # is formatted as {path to victim manager: [list of surrogate paths]}
         # we only want 1 surrogate path
-        models_satisfying_strategy = getVictimSurrogateModels(surrogate_args=strategies[strategy], architectures=architectures)
+        models_satisfying_strategy = getVictimSurrogateModels(
+            surrogate_args=strategies[strategy], architectures=architectures
+        )
         for arch in architectures:
             found = False
             for vict_path in models_satisfying_strategy:
                 if str(vict_path).find(arch) >= 0:
                     found = True
-                    assert len(models_satisfying_strategy[vict_path]) > 0, f"Could not find any surrogate models with arch {arch} and strategy {strategies[strategy]}"
+                    assert (
+                        len(models_satisfying_strategy[vict_path]) > 0
+                    ), f"Could not find any surrogate models with arch {arch} and strategy {strategies[strategy]}"
                     strategy_result[arch] = models_satisfying_strategy[vict_path][0]
                     break
-            assert found, f"Could not find any surrogate models with arch {arch} and strategy {strategies[strategy]}"
+            assert (
+                found
+            ), f"Could not find any surrogate models with arch {arch} and strategy {strategies[strategy]}"
         result[strategy] = strategy_result
     return result
 
