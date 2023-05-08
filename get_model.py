@@ -149,7 +149,7 @@ def fixLastLayer(model: torch.nn.Module, architecture: str, num_classes: int, fi
     if architecture in ['resnet18', 'resnet34']:
         model.fc = torch.nn.Linear(512, num_classes)
         return True
-    if architecture in ['resnet50', 'resnet101', 'resnet152''resnext50_32x4d', 'resnext101_32x8d','wide_resnet50_2', 'wide_resnet101_2']:
+    if architecture in ['resnet50', 'resnet101', 'resnet152', 'resnext50_32x4d', 'resnext101_32x8d','wide_resnet50_2', 'wide_resnet101_2']:
         model.fc = torch.nn.Linear(2048, num_classes)
         return True
     if family == "vgg":

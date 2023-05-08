@@ -629,14 +629,14 @@ def trainKnockoffSurrogateModels(
                 entropy=entropy,
                 force=True,
             )
-            for i in range(len(epochs)):
+            for j in range(len(epochs)):
                 default_lr = getModelParams(architecture).get("lr", 0.1)
                 surrogate_model.trainModel(
-                    num_epochs=epochs[i],
-                    patience=patience[i],
+                    num_epochs=epochs[j],
+                    patience=patience[j],
                     debug=debug,
-                    lr=default_lr * lr[i],
-                    run_attack=True,
+                    lr=default_lr * lr[j],
+                    run_attack=run_attack,
                     replace=True,
                 )
             config.EMAIL.email_update(
@@ -665,6 +665,8 @@ if __name__ == "__main__":
     # testKnockoffTrain(dataset="cifar100", gpu=-1, debug=1)
     # testKnockoffTrain(dataset="cifar100", gpu=0)
     # testKnockoffTrain(dataset="tiny-imagenet-200", gpu=1)
+    # model_paths = None
+    model_paths = VictimModelManager.getModelPaths(architectures=["alexnet", "resnext50_32x4d", "resnet152"])
     trainKnockoffSurrogateModels(
         dataset="cifar100",
         transfer_size=40000,
@@ -676,6 +678,7 @@ if __name__ == "__main__":
         patience=[7, 7, 3],
         lr=[1, 0.1, 0.01],
         run_attack=True,
-        gpu=-0,
+        gpu=0,
+        model_paths=model_paths,
     )
     exit(0)

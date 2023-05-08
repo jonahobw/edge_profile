@@ -1185,6 +1185,7 @@ class VictimModelManager(ProfiledModelManager):
                 [],
             ),  # 2nd element is for validation data
             deterministic=True,
+            resize=getModelParams(self.architecture).get("input_size", None),
         )
         return file, transfer_set
 

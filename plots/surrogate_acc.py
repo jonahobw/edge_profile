@@ -109,7 +109,7 @@ def getVictimSurrogateAccs(models: List[Tuple[Path, Path]], dataset) -> Tuple[Li
 """
     
 
-def plotMetricByModelAndStrategy(strategies: dict, models: List[str], metric: str, absolute: bool = False, include_victim: bool = True):
+def plotMetricByModelAndStrategy(strategies: dict, models: List[str], metric: str, absolute: bool = False, include_victim: bool = True, save: bool = True):
     """
     Note this currently assumes that there is only 1 victim model per architecture.
     
@@ -138,7 +138,7 @@ def plotMetricByModelAndStrategy(strategies: dict, models: List[str], metric: st
         if include_victim is False.  Either set include_victim to True or set 
         absolute to True."""
 
-
+    plt.cla()
     # manager_paths is a dict of {strategy name: {architecture_name: path to surrogate model}}
     manager_paths = getModelsFromSurrogateTrainStrategies(strategies=strategies, architectures=models)
     strategy_labels = list(strategies.keys())
@@ -149,10 +149,13 @@ def plotMetricByModelAndStrategy(strategies: dict, models: List[str], metric: st
 
     for model in models:
         model_data = [model]
-
-        for strategy in strategies:
-            path = manager_paths[strategy][model]
-            model_data.append(SurrogateModelManager.loadConfig(path.parent)[metric])
+        try:
+            for strategy in strategies:
+                path = manager_paths[strategy][model]
+                model_data.append(SurrogateModelManager.loadConfig(path.parent)[metric])
+        except Exception as e:
+            print(f"Strategy: {strategy}\nPath: {path}")
+            raise e
         
         if include_victim:
             # get metric of victim model, assumes only 1 victim
@@ -197,19 +200,21 @@ def plotMetricByModelAndStrategy(strategies: dict, models: List[str], metric: st
     ax.legend()
     plt.xticks(rotation=45, ha="right")
     fig.tight_layout()
-    plt.show()
+    if save:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        plt.savefig(SAVE_FOLDER / f"{metric}_{'with' if include_victim else 'no'}_victim_{timestamp}.png", dpi=500)
+    else:
+        plt.show()
 
-    # timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    # plt.savefig(SAVE_FOLDER / f"{dataset}_{timestamp}.png", dpi=500)
 
-
-def plotMultipleTrainingMetrics(strategies: dict, models: List[str], metrics: List[str], y_lim: Tuple[float, float] = None):
+def plotMultipleTrainingMetrics(strategies: dict, models: List[str], metrics: List[str], y_lim: Tuple[float, float] = None, save: bool = True):
     """
     plot multiple metrics averaged by model architecture for a single
     surrogate model training strategy.
 
     The number of training epochs must be the same for each model.
     """
+    plt.cla()
     assert len(strategies) == 1
     # manager_paths is a dict of {strategy name: {architecture_name: path to surrogate model}}
     manager_paths = getModelsFromSurrogateTrainStrategies(strategies=strategies, architectures=models)
@@ -236,44 +241,55 @@ def plotMultipleTrainingMetrics(strategies: dict, models: List[str], metrics: Li
     plt.ylabel("Metric Value")
     arch_str = f"{str(models)}"[1:-1].replace("'", "") if len(models) < 4 else str(len(models))
     title = f"Surrogate Model Metrics for {strategy_name} Training\nAveraged over {arch_str} Architecture{'s' if len(models) > 1 else ''}"
+    plt.xlabel("Training Epoch")
     plt.title(title)
     plt.xticks()
     if y_lim is not None:
         plt.ylim(y_lim)
     plt.legend()
     plt.tight_layout()
-    plt.show()
+    if save:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        plt.savefig(SAVE_FOLDER / f"{strategy_name}_{timestamp}.png", dpi=500)    
+    else:
+        plt.show()
 
-    # timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    # plt.savefig(SAVE_FOLDER / f"{dataset}_{timestamp}.png", dpi=500)
 
 if __name__ == '__main__':
 
     # this is a set of args to match with model manager config
     # values.
     strategies = {
-        "knowledge_dist" : {
-            "pretrained": False,
-            "knockoff_transfer_set": None,
-        },
-        # "knockoff1" : {
+        # "other_half_cifar10" : {
         #     "pretrained": False,
-        #     "knockoff_transfer_set": {
-        #         "dataset_name": "cifar100",
-        #         "transfer_size": 10000,
-        #         "sample_avg": 5,
-        #         "random_policy": True,
-        #         "entropy": True,
-        #     },
+        #     "knockoff_transfer_set": None,
         # },
+        "knockoff_cifar100" : {
+            "pretrained": True,
+            "knockoff_transfer_set": {
+                "dataset_name": "cifar100",
+                "transfer_size": 40000,
+                "sample_avg": 50,
+                "random_policy": False,
+                "entropy": True,
+            },
+        },
     }
 
     # the set of model architectures to use.
     models = MODELS
     # models = ["resnet18"]
     # models = [models[9]]
+    exclude = []
+    # exclude = ['vgg11_bn', 'vgg13', 'vgg13_bn', 'vgg16', 'vgg16_bn', 'vgg19_bn', 'vgg19', 'squeezenet1_0', 'squeezenet1_1', 'mnasnet0_5', 'mnasnet0_75', 'mnasnet1_0', 'mnasnet1_3',]
+    # exclude.extend(["alexnet", "resnet152", "resnext50_32x4d"])
+    for ex in exclude:
+        models.remove(ex)
 
-    # plotMetricByModelAndStrategy(strategies=strategies, models=models, metric = "val_acc1", absolute=True, include_victim=False)
-    plotMultipleTrainingMetrics(strategies=strategies, models=models, metrics=["val_acc1", "train_acc1"])
-    # plotMultipleTrainingMetrics(strategies=strategies, models=models, metrics=["val_loss", "train_loss"])
+    plotMetricByModelAndStrategy(strategies=strategies, models=models, metric = "val_acc1", absolute=True, include_victim=True)
+    # plotMetricByModelAndStrategy(strategies=strategies, models=models, metric = "val_acc1", absolute=False, include_victim=True)
+    # plotMultipleTrainingMetrics(strategies=strategies, models=models, metrics=["val_acc1", "train_acc1"])
+    # plotMultipleTrainingMetrics(strategies=strategies, models=models, metrics=["val_loss", "train_loss"], y_lim=(0.01, 0.1), save=True)
+    # plotMultipleTrainingMetrics(strategies=strategies, models=models, metrics=["l1_weight_bound"], save=True)
+    # plotMultipleTrainingMetrics(strategies=strategies, models=models, metrics=["transfer_attack_success"], save=True)
 
