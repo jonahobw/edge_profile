@@ -28,7 +28,7 @@ from data_engineering import (
 )
 from format_profiles import parse_one_profile
 from architecture_prediction import get_arch_pred_model, ArchPredBase
-from model_manager import predictVictimArchs
+from experiments import predictVictimArchs
 from config import SYSTEM_SIGNALS
 from utils import latest_file
 

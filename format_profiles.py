@@ -4,7 +4,7 @@ Also has capability to validate nvprof success and class balance.
 """
 
 import json
-from typing import List, Mapping, Tuple, Union
+from typing import Dict, List, Mapping, Tuple, Union
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -278,6 +278,7 @@ def parse_one_profile(csv_file=None, example=False, gpu=0, remove_nans=True, gpu
     :param gpu: the gpu that the profile was run on.
     :return: a pandas Series
     """
+    csv_file = Path(csv_file)
     gpu_prof = parse_one_aggregate_profile(csv_file, example=example, gpu_activities_only=gpu_activities_only, api_calls_only=api_calls_only)
     system_prof = parse_one_system_profile(csv_file, example=example, gpu=gpu)
     # return gpu_prof.append(system_prof)
@@ -296,6 +297,16 @@ def avgProfiles(profile_paths: List[Path], gpu=0) -> pd.Series:
         combined = pd.concat((combined, features), ignore_index=True, axis=0)
 
     return np.mean(combined, axis=0)
+
+def minProfiles(profile_paths: List[Path], gpu=0) -> pd.Series:
+    """Given a list of profile paths, parse them all and take the minimum of each feature."""
+    combined = pd.DataFrame()
+    for path in profile_paths:
+        features = parse_one_profile(csv_file=path, gpu=gpu)
+        features = features.to_frame().T
+        combined = pd.concat((combined, features), ignore_index=True, axis=0)
+
+    return np.min(combined, axis=0)
 
 
 def parse_all_profiles(
@@ -566,6 +577,20 @@ def read_csv(folder: Path = None, gpu: int = 0, gpu_activities_only = False, api
         parse_all_profiles(folder, gpu=gpu, gpu_activities_only=gpu_activities_only, api_calls_only=api_calls_only)
     return pd.read_csv(aggregated_csv_file, index_col=False)
 
+
+def findProfiles(folder: Path) -> Dict[str, List[Path]]:
+    """
+    Given a path to a profile folder, whose subfolders contain profiles of
+    different DNN architectures and the name of the subfolder is the architecture,
+    return a dictionary of {DNN architecture name: [list of paths to profiles for
+    this architecture]}
+    """
+    result = {}
+    for subdir in [x for x in folder.iterdir() if x.is_dir()]:
+        architecture = subdir.name
+        model_profiles = list(subdir.glob("*.csv"))
+        result[architecture] = model_profiles
+    return result
 
 if __name__ == "__main__":
     # a = parse_all_profiles("debug_2")

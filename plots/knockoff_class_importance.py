@@ -26,7 +26,7 @@ sys.path.append("../edge_profile")
 from model_manager import VictimModelManager
 from utils import checkDict
 
-# rc('font',**{'family':'serif','serif':['Times'], 'size': 14})
+rc('font',**{'family':'serif','serif':['Times'], 'size': 14})
 # rc('figure', **{'figsize': (5, 4)})
 
 SAVE_FOLDER = Path(__file__).parent.absolute() / "knockoff_class_importance"
@@ -75,9 +75,15 @@ def plotClassImportance(knockoff_params: dict, victim_arch: str = "resnet18", nu
 
     # Add some text for labels, title and custom x-axis tick labels, etc.
     ax.set_ylabel("Class Importance")
-    ax.set_title("Class Importance by Transfer Set")
+    
+    if len(knockoff_params) == 1:
+        ax.set_title(f"Class Importance for {next(iter(knockoff_params))} Transfer Dataset")
+    else:
+        ax.set_title("Class Importance by Transfer Set")
+        ax.legend()
     ax.set_xticks(x, classes)
-    ax.legend()
+    ax.set_xlabel(f"Top {knockoff_dataset} Classes")
+    
     plt.xticks(rotation=45, ha="right")
     fig.tight_layout()
     if save:
@@ -101,13 +107,13 @@ if __name__ == '__main__':
             "random_policy": False,
             "entropy": True,
         },
-        "Confidence": {
-            "dataset_name": "cifar100",
-            "transfer_size": 10000,
-            "sample_avg": 50,
-            "random_policy": False,
-            "entropy": True,
-        },
+        # "Confidence": {
+        #     "dataset_name": "cifar100",
+        #     "transfer_size": 10000,
+        #     "sample_avg": 50,
+        #     "random_policy": False,
+        #     "entropy": True,
+        # },
     }
 
     plotClassImportance(knockoff_params=knockoff_params, num_classes=20)

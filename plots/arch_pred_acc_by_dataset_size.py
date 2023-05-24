@@ -25,7 +25,7 @@ from architecture_prediction import (
     get_arch_pred_model,
     arch_model_names,
 )
-from model_manager import predictVictimArchs
+from experiments import predictVictimArchs
 from config import SYSTEM_SIGNALS
 from arch_pred_accuracy import getDF
 

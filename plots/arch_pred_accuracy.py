@@ -36,7 +36,7 @@ from architecture_prediction import (
     RFArchPred,
     arch_model_names,
 )
-from model_manager import predictVictimArchs
+from experiments import predictVictimArchs
 from config import SYSTEM_SIGNALS
 from utils import latest_file
 

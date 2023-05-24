@@ -107,18 +107,21 @@ def profileAllVictimModels(
 
 
 def trainSurrogateModels(
+    epochs: List[int],
+    patience: List[int],
+    lr: List[float],
     predict: bool = True,
     arch_pred_model_type: str = "nn",
     model_paths: List[str] = None,
-    epochs=50,
     gpu=0,
     reverse=False,
     debug=None,
     save_model: bool = True,
-    patience: int = 5,
     df=None,
     average_profiles: bool = False,
     filters: dict = None,
+    pretrained: bool = True,
+    run_attack: bool = True,
 ):
     """Victim models must be trained and profiled already."""
     if model_paths is None:
@@ -152,10 +155,18 @@ def trainSurrogateModels(
                 arch_pred_model_name=arch_pred_model_name,
                 gpu=gpu,
                 save_model=save_model,
+                pretrained=pretrained,
             )
-            surrogate_model.trainModel(
-                num_epochs=epochs, patience=patience, debug=debug
-            )
+            for j in range(len(epochs)):
+                default_lr = getModelParams(arch).get("lr", 0.1)
+                surrogate_model.trainModel(
+                    num_epochs=epochs[j],
+                    patience=patience[j],
+                    debug=debug,
+                    lr=default_lr * lr[j],
+                    run_attack=run_attack,
+                    replace=True,
+                )
             config.EMAIL.email_update(
                 start=start,
                 iter_start=iter_start,
@@ -666,13 +677,55 @@ if __name__ == "__main__":
     # testKnockoffTrain(dataset="cifar100", gpu=0)
     # testKnockoffTrain(dataset="tiny-imagenet-200", gpu=1)
     # model_paths = None
-    model_paths = VictimModelManager.getModelPaths(architectures=["alexnet", "resnext50_32x4d", "resnet152"])
-    trainKnockoffSurrogateModels(
-        dataset="cifar100",
-        transfer_size=40000,
-        sample_avg=50,
-        random_policy=False,
-        entropy=True,
+    model_paths = VictimModelManager.getModelPaths(architectures=[
+        'alexnet',
+        'resnext50_32x4d',
+        'resnext101_32x8d',
+        'wide_resnet50_2',
+        'wide_resnet101_2',
+        'vgg11',
+        'vgg11_bn',
+        'vgg13',
+        'vgg13_bn',
+        'vgg16',
+        'vgg16_bn',
+        'vgg19_bn',
+        'vgg19',
+        'squeezenet1_0',
+        'squeezenet1_1',
+        'densenet121',
+        'densenet169',
+        'densenet201',
+        'densenet161',
+        'googlenet',
+        'mobilenet_v2',
+        "mobilenet_v3_large",
+        "mobilenet_v3_small",
+        'mnasnet0_5',
+        'mnasnet0_75',
+        'mnasnet1_0',
+        'mnasnet1_3',
+        'shufflenet_v2_x0_5',
+        'shufflenet_v2_x1_0',
+        'shufflenet_v2_x1_5',
+        'shufflenet_v2_x2_0'
+    ])
+    # trainKnockoffSurrogateModels(
+    #     dataset="cifar100",
+    #     transfer_size=40000,
+    #     sample_avg=50,
+    #     random_policy=False,
+    #     entropy=True,
+    #     pretrained=True,
+    #     epochs=[20, 20, 10],
+    #     patience=[7, 7, 3],
+    #     lr=[1, 0.1, 0.01],
+    #     run_attack=True,
+    #     gpu=0,
+    #     model_paths=model_paths,
+    # )
+    trainSurrogateModels(
+        predict=False,
         pretrained=True,
         epochs=[20, 20, 10],
         patience=[7, 7, 3],

@@ -79,11 +79,10 @@ class ArchPredBase(ABC):
         conf_scores = self.getConfidenceScores(x, preprocess=preprocess)
         # adapted from
         # https://stackoverflow.com/questions/6910641/how-do-i-get-indices-of-n-maximum-values-in-a-numpy-array
-        indices = np.argpartition(conf_scores, -k)[-4:]
+        indices = np.argpartition(conf_scores, -k)[-k:]
         # sort by highest confidence first
-        indices = indices[np.argsort(conf_scores[indices])][::-1]
-        topk = conf_scores[indices]
-        return self.label_encoder.inverse_transform(topk)
+        indices = indices[np.argsort(np.array(conf_scores)[indices])][::-1]
+        return self.label_encoder.inverse_transform(indices)
 
     def topKConf(
         self, x: pd.Series, k: int = 3, preprocess=True
@@ -92,7 +91,7 @@ class ArchPredBase(ABC):
         conf_scores = self.getConfidenceScores(x, preprocess=preprocess)
         # adapted from
         # https://stackoverflow.com/questions/6910641/how-do-i-get-indices-of-n-maximum-values-in-a-numpy-array
-        indices = np.argpartition(conf_scores, -k)[-4:]
+        indices = np.argpartition(conf_scores, -k)[-k:]
         result = []
         for idx in indices:
             result.append(
@@ -309,7 +308,7 @@ class NN2LRArchPred(SKLearnClassifier):
         self.model = make_pipeline(StandardScaler(), self.estimator)
         self.model.fit(self.x_tr, self.y_train)
         if self.verbose:
-            self.evaluateTest
+            self.evaluateTest()
 
     def getConfidenceScores(self, x: pd.Series, preprocess=True) -> np.ndarray:
         if preprocess:

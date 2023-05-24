@@ -1500,6 +1500,7 @@ class SurrogateModelManager(ModelManagerBase):
                 "arch_confidence": self.arch_confidence,
                 "pretrained": self.pretrained,
                 "knockoff_transfer_set_path": "",
+                "knockoff_transfer_set": None,
             }
         )
         self.train_metrics.extend(
@@ -1543,6 +1544,7 @@ class SurrogateModelManager(ModelManagerBase):
                     "random_policy": random_policy,
                     "entropy": entropy,
                 },
+                "knockoff_transfer_set_path": str(self.knockoff_transfer_set[0]),
             }
         )
 
@@ -1559,13 +1561,22 @@ class SurrogateModelManager(ModelManagerBase):
         surrogate_manager = SurrogateModelManager(
             victim_model_path=vict_model_path,
             architecture=conf["architecture"],
-            arch_conf=conf,
+            arch_conf=conf["arch_confidence"],
             arch_pred_model_name=conf["arch_pred_model_name"],
             pretrained=conf["pretrained"],
             load_path=model_path,
             gpu=gpu,
         )
         print(f"Loaded surrogate model\n{model_path}\n")
+        if conf["knockoff_transfer_set"] is not None:
+            surrogate_manager.loadKnockoffTransferSet(
+                dataset_name=conf["knockoff_transfer_set"]["dataset_name"],
+                transfer_size=conf["knockoff_transfer_set"]["transfer_size"],
+                sample_avg=conf["knockoff_transfer_set"]["sample_avg"],
+                random_policy=conf["knockoff_transfer_set"]["random_policy"],
+                entropy=conf["knockoff_transfer_set"]["entropy"],
+                force=False,
+            )
         return surrogate_manager
 
     @staticmethod
@@ -1893,7 +1904,7 @@ def getVictimSurrogateModels(
 
 
 def getModelsFromSurrogateTrainStrategies(
-    strategies: dict, architectures: List[str]
+    strategies: dict, architectures: List[str], latest_file: bool=True,
 ) -> Dict[str, Dict[str, Path]]:
     """
     architectures is a list of DNN architecture strings, like config.MODELS
@@ -1955,8 +1966,7 @@ def getModelsFromSurrogateTrainStrategies(
     result = {}
     for strategy in strategies:
         strategy_result = {}
-        # this will include models from all architectures, and
-        # is formatted as {path to victim manager: [list of surrogate paths]}
+        # formatted as {path to victim manager: [list of surrogate paths]}
         # we only want 1 surrogate path
         models_satisfying_strategy = getVictimSurrogateModels(
             surrogate_args=strategies[strategy], architectures=architectures
@@ -1964,12 +1974,12 @@ def getModelsFromSurrogateTrainStrategies(
         for arch in architectures:
             found = False
             for vict_path in models_satisfying_strategy:
-                if str(vict_path).find(arch) >= 0:
+                if vict_path.parent.parent.name == arch:    #str(vict_path).find(arch) >= 0:
                     found = True
                     assert (
                         len(models_satisfying_strategy[vict_path]) > 0
                     ), f"Could not find any surrogate models with arch {arch} and strategy {strategies[strategy]}"
-                    strategy_result[arch] = models_satisfying_strategy[vict_path][0]
+                    strategy_result[arch] = latestFileFromList(models_satisfying_strategy[vict_path], oldest= not latest_file)
                     break
             assert (
                 found

@@ -38,7 +38,8 @@ from architecture_prediction import (
     ArchPredBase,
     arch_model_names,
 )
-from model_manager import predictVictimArchs, VictimModelManager
+from experiments import predictVictimArchs
+from model_manager import VictimModelManager
 
 SAVE_FOLDER = Path(__file__).parent.absolute() / "cross_gpu_acc"
 if not SAVE_FOLDER.exists():

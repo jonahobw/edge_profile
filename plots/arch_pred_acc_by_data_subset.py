@@ -39,7 +39,7 @@ from architecture_prediction import (
     arch_model_names,
     arch_model_full_name
 )
-from model_manager import predictVictimArchs
+from experiments import predictVictimArchs
 from config import SYSTEM_SIGNALS
 from utils import latest_file
 

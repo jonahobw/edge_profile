@@ -23,10 +23,11 @@ plots/arch_pred_acc_by_dataset_size
 plots/cross_gpu_acc
 plots/prune_pred_acc
 plots/top_n_features
+plots/surrogate_acc
 onnx_models/
 plots/theoretical_dummy/
 knockoff/
-tensorflow/
+# tensorflow/
 test_tensorflow.py
 
 # Byte-compiled / optimized / DLL files

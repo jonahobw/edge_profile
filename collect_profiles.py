@@ -51,7 +51,10 @@ def run_command_popen(folder, command, model_type):
     return validProfile(profile_file), profile_file
 
 
-def generateExeName(use_exe: bool) -> str:
+def generateExeName(use_exe: bool, use_tf: bool) -> str:
+    if use_tf:
+        assert not use_exe
+        return "python " + str(Path(__file__).parent / "tensorflow" / "model_inference.py")
     system = getSystem()
     executable = f"exe/{system}/{system}_inference.exe"
     if not use_exe:
@@ -135,6 +138,12 @@ if __name__ == "__main__":
         nargs="*",
         help="List of models to profile separated by spaces.  Default is all models.",
     )
+    parser.add_argument(
+        "-use_tf",
+        action="store_true",
+        help="Use tensorflow for profiling.  Requires -noexe flag as well."
+    )
+    parser.add_argument("-email", action="store_true", help="send emails when each model is done profiling.")
 
     args = parser.parse_args()
 
@@ -157,7 +166,7 @@ if __name__ == "__main__":
     i_seeds = [random.randint(0, 999999) for i in range(args.i)]
 
     # file to execute
-    executable = generateExeName(not args.noexe)
+    executable = generateExeName(use_exe=not args.noexe, use_tf=args.use_tf)
 
     # save arguments to json file
     file = profile_folder / "arguments.json"
@@ -204,12 +213,18 @@ if __name__ == "__main__":
 
                 if args.pretrained:
                     command += " -pretrained"
+                
+                if args.use_tf:
+                    command = (
+                        f"nvprof --csv --log-file {log_file_prefix}%p.csv --system-profiling on "
+                        f"--profile-child-processes {executable} -gpu {args.gpu} -model {model}"
+                    )
 
                 # sometimes nvprof fails, keep trying until it succeeds.
                 success, file = run_command(model_folder, command)
                 retries = 0
                 while not success:
-                    print("\nNvprof failed, retrying ... \n")
+                    print(f"\nNvprof failed while running command\n\n{command}\n\nretrying ... \n")
                     time.sleep(10)
                     latest_file(model_folder).unlink()
                     success, file = run_command(model_folder, command)
@@ -227,15 +242,15 @@ if __name__ == "__main__":
                     f"Average {str(avg_prof_time)[:4]}mins per profile on {model}, "
                     f"estimated time left {str(est_time)[:4]} mins"
                 )
-
-            config.EMAIL.email_update(
-                start=start,
-                iter_start=iter_start,
-                iter=model_num,
-                total_iters=len(models_to_profile),
-                subject=f"Profiles Collected for {model}",
-                params=save_args,
-            )
+            if args.email:
+                config.EMAIL.email_update(
+                    start=start,
+                    iter_start=iter_start,
+                    iter=model_num,
+                    total_iters=len(models_to_profile),
+                    subject=f"Profiles Collected for {model}",
+                    params=save_args,
+                )
             print("Allowing GPUs to cool between models ...")
             time.sleep(args.sleep)
 
