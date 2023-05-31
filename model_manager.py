@@ -1437,6 +1437,7 @@ class SurrogateModelManager(ModelManagerBase):
         load_path: Path = None,
         gpu: int = -1,
         save_model: bool = True,
+        data_idx: int = 1,
     ):
         """
         If load_path is not none, it should be a path to model.
@@ -1477,8 +1478,8 @@ class SurrogateModelManager(ModelManagerBase):
             model_name=f"surrogate_{self.victim_model.model_name}_{architecture}",
             path=path,
             dataset=self.victim_model.dataset.name,
-            data_subset_percent=self.victim_model.data_subset_percent,
-            data_idx=1,
+            data_subset_percent= 1 - self.victim_model.data_subset_percent,
+            data_idx=data_idx,
             gpu=gpu,
             save_model=save_model,
         )
@@ -1563,6 +1564,7 @@ class SurrogateModelManager(ModelManagerBase):
             architecture=conf["architecture"],
             arch_conf=conf["arch_confidence"],
             arch_pred_model_name=conf["arch_pred_model_name"],
+            data_idx=conf["data_idx"],
             pretrained=conf["pretrained"],
             load_path=model_path,
             gpu=gpu,

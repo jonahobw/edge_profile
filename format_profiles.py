@@ -578,6 +578,23 @@ def read_csv(folder: Path = None, gpu: int = 0, gpu_activities_only = False, api
     return pd.read_csv(aggregated_csv_file, index_col=False)
 
 
+def combineCsv(profile_folders: List[Path], gpus: List[int], destination: Path=None) -> pd.DataFrame:
+    """
+    Given a list of paths to aggregated.csv profiles, along with their gpus, combine
+    all of the profiles into one aggregated.csv file.  If destination is provided,
+    the combined csv will be stored there.  Returns the dataframe of the combined
+    csv.
+    """
+    assert len(profile_folders) == len(gpus)
+    profiles = []
+    for folder, gpu in zip(profile_folders, gpus):
+        profiles.append(read_csv(folder=folder, gpu=gpu))
+    result = pd.concat(profiles, ignore_index=True)
+    if destination is not None:
+        result.to_csv(destination, index=False)
+    return result
+
+
 def findProfiles(folder: Path) -> Dict[str, List[Path]]:
     """
     Given a path to a profile folder, whose subfolders contain profiles of

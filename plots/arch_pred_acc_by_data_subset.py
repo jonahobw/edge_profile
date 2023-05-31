@@ -44,6 +44,7 @@ from config import SYSTEM_SIGNALS
 from utils import latest_file
 
 PROFILE_FOLDER = Path.cwd() / "profiles" / "quadro_rtx_8000" / "zero_exe_pretrained"
+CROSS_ML_FRAMEWORK_PROFILE_FOLDER = Path.cwd() / "profiles" / "quadro_rtx_8000" / "tensorflow_and_zero_exe_pretrained"
 SAVE_FOLDER = Path(__file__).parent.absolute() / "arch_pred_acc_by_data_subset"
 QUADRO_VICT_PROFILE_FOLDER = Path.cwd() / "victim_profiles"
 
@@ -115,17 +116,19 @@ def generateTable(data_subsets: Dict[str, pd.DataFrame], victim_profile_folder: 
     printNumFeatures(data_subsets)
 
 
-def semanticSubsets():
+def semanticSubsets(profile_folder: Path = None):
+    if profile_folder is None:
+        profile_folder = PROFILE_FOLDER
     data_subsets = {
-        "All": all_data(PROFILE_FOLDER),
-        "System" : all_data(PROFILE_FOLDER, system_data_only=True),
-        "No System" : all_data(PROFILE_FOLDER, no_system_data=True),
-        "GPU Kernel" : all_data(PROFILE_FOLDER, gpu_activities_only=True, no_system_data=True),
-        "API Calls" : all_data(PROFILE_FOLDER, api_calls_only=True, no_system_data=True),
-        "Indicator": all_data(PROFILE_FOLDER, indicators_only=True),
-        "No Indicator": remove_cols(all_data(PROFILE_FOLDER), substrs=["indicator"]),
-        "GPU Kernel, No Memory": remove_cols(all_data(PROFILE_FOLDER, gpu_activities_only=True, no_system_data=True), substrs=["mem"]),
-        "GPU Kernel, Memory Only": filter_cols(all_data(PROFILE_FOLDER, gpu_activities_only=True, no_system_data=True), substrs=["mem"]),
+        "All": all_data(profile_folder),
+        "System" : all_data(profile_folder, system_data_only=True),
+        "No System" : all_data(profile_folder, no_system_data=True),
+        "GPU Kernel" : all_data(profile_folder, gpu_activities_only=True, no_system_data=True),
+        "API Calls" : all_data(profile_folder, api_calls_only=True, no_system_data=True),
+        "Indicator": all_data(profile_folder, indicators_only=True),
+        "No Indicator": remove_cols(all_data(profile_folder), substrs=["indicator"]),
+        "GPU Kernel, No Memory": remove_cols(all_data(profile_folder, gpu_activities_only=True, no_system_data=True), substrs=["mem"]),
+        "GPU Kernel, Memory Only": filter_cols(all_data(profile_folder, gpu_activities_only=True, no_system_data=True), substrs=["mem"]),
     }
     return data_subsets
 
@@ -160,10 +163,15 @@ def best_rf_gpu_nomem():
     subsets = topFeatureSubsets(feature_rank_file="rf_gpu_kernels_nomem.json", num_features=[3, 25, 1000])
     generateTable(subsets, victim_profile_folder=QUADRO_VICT_PROFILE_FOLDER, save_name="rf_gpu_nomem_rank.csv")
 
+def crossMlFramework():
+    subsets = {"All": all_data(CROSS_ML_FRAMEWORK_PROFILE_FOLDER)}
+    generateTable(subsets, victim_profile_folder=QUADRO_VICT_PROFILE_FOLDER, save_name="cross_ml_frameworks.csv")
+
 if __name__ == '__main__':
     #createTable()
     # small()
-    best_rf_gpu_nomem()
+    #best_rf_gpu_nomem()
+    crossMlFramework()
     exit(0)
 
     
