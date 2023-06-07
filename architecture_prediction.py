@@ -58,12 +58,13 @@ class ArchPredBase(ABC):
         self.model = None
         self.deterministic = deterministic
 
-    def preprocessInput(self, x: pd.Series):
+    def preprocessInput(self, x: pd.Series, expand: bool = True):
         x = add_indicator_cols_to_input(
             self.data, x, exclude=["file", "model", "model_family"]
         )
         x = x.to_numpy(dtype=np.float32)
-        x = np.expand_dims(x, axis=0)
+        if expand:
+            x = np.expand_dims(x, axis=0)
         return x
 
     @abstractmethod
@@ -117,12 +118,16 @@ class ArchPredBase(ABC):
         print(f"{self.name} test acc: {acc}")
         return acc
     
-    def evaluateAcc(self, data: pd.DataFrame, y_label: str = "model") -> float:
+    def evaluateAcc(self, data: pd.DataFrame, y_label: str = "model", preprocess: bool = True) -> float:
         # data columns must match training data columns
         y = self.label_encoder.transform(data[y_label])
-        x = data.drop(columns=["file", "model_family", "model"], axis=1)
-        return self.model.score(x, y)
-
+        if not preprocess:
+            x = data.drop(columns=["file", "model_family", "model"], axis=1)
+            return self.model.score(x, y)
+        table = pd.DataFrame(columns=self.x_tr.columns)
+        for index, row in data.iterrows():
+            table.loc[index] = self.preprocessInput(row, expand=False)
+        return self.model.score(table, y)
 
     # def evaluateTopKNumpy(self, k: int, train=True):
     #     x = self.x_tr

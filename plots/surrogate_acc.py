@@ -186,6 +186,7 @@ def plotMetricByModelAndStrategy(strategies: dict, models: List[str], metric: st
         if absolute:
             strategy_data = [x[i+1] for x in data]
         ax.bar(x - offset, strategy_data, bar_width, label=strategy_name)
+        print(f"Data:\n{strategy_data}\nAvg {sum(strategy_data)/len(strategy_data)}\tMin {min(strategy_data)}\tMax {max(strategy_data)}")
     
     # if absolute, add the victim model metric for comparison
     if absolute and include_victim:
@@ -315,6 +316,7 @@ def plotOneMetricPerModel(strategies: dict, models: List[str], metric: str, y_li
     for strategy in data:
         avg_metric = [data[strategy][i]/len(models) for i in range(num_epochs)]
         plt.plot(x_axis, avg_metric, label=strategy)
+        print(f"Avg Metric\n{avg_metric}")
     
     # Add some text for labels, title and custom x-axis tick labels, etc.
     arch_str = f"{str(models)}"[1:-1].replace("'", "") if len(models) < 4 else str(len(models))
@@ -414,10 +416,10 @@ if __name__ == '__main__':
         #     "pretrained": False,
         #     "knockoff_transfer_set": None,
         # },
-        "other_half_cifar10_pretrained" : {
-            "pretrained": True,
-            "knockoff_transfer_set": None,
-        },
+        # "other_half_cifar10_pretrained" : {
+        #     "pretrained": True,
+        #     "knockoff_transfer_set": None,
+        # },
         "knockoff_cifar100_pretrained" : {
             "pretrained": True,
             "knockoff_transfer_set": {
@@ -450,8 +452,8 @@ if __name__ == '__main__':
     # plotMultipleTrainingMetrics(strategies=strategies, models=models, metrics=["transfer_attack_success"], save=True)
     # plotOneMetricPerModel(strategies=strategies, models=models, metric="val_acc1", save=False, include_victim=True)
     # plotOneMetricPerModel(strategies=strategies, models=models, metric="val_loss", save=False, include_victim=True, y_lim=(0.001, 0.075))
-    plotOneMetricPerModel(strategies=strategies, models=models, metric="l1_weight_bound", save=False, normalize=True)
-    # plotOneMetricPerModel(strategies=strategies, models=models, metric="transfer_attack_success", save=False)
+    # plotOneMetricPerModel(strategies=strategies, models=models, metric="l1_weight_bound", save=False, normalize=True)
+    plotOneMetricPerModel(strategies=strategies, models=models, metric="transfer_attack_success", save=False)
     # plotOneMetricPerModel(strategies=strategies, models=models, metric="val_agreement", save=False)
     # plotSingleMetricByModel(strategies=strategies, models=models, metric="l1_weight_bound", save=False, normalize=True)
     # plotSingleMetricByModel(strategies=strategies, models=models, metric="transfer_attack_success", save=False, normalize=False)

@@ -1,19 +1,10 @@
--   figure out where nan columns such as "avg_us_nan" come from in aggregated csv (zero_noexe as example)
-    - comes from profile parsing, some profiles get nan columns
--   add column for number of inferences and input type
+-   add profile column for number of inferences and input type
 -   ablation study on whether input type matters
     -   code different input types, like checkered, snake, and actual data from distribution.
 -   ablation study on whether weights matter (pretrained or not, pruned, etc)
     - if they do matter, does training dataset matter? (might have to control for input/output size)
--   deploy on jetson nano
-
--   try with different frameworks, like tflite
--   DO THE INPUTS THAT I FEED DURING PROFILING (SUCH AS ALL 1'S)  NEED TO BE TRANSFORMED FIRST?
 -   Add support to provide the inputs for profiling directly from the dataloader/dataset (maybe link the dataset.py
-    class to the construct_input.py).
-
-Low priority:
--   does clustering profiles result in model family segmentation?  Can this be done using only system data?
+    class to the construct_input.py), and for transforming images to the right mean and std.
 
 Formatting:
 -   add docstrings
@@ -23,14 +14,5 @@ Formatting:
 -   make notebooks
 
 
--------------------------------------------------------------
-Results to generate:
-
--   model architecture prediction accuracy on {all data, system data only, gpu data only, recursive feature selection} 
-    by model type (logistic regression, neural net, other??)
-    -   by type of input, number of inferences, time to sleep between inferences, 
-        pretrained vs not (would rather have deterministic cases so maybe only have trained), exe vs not
--   using different attacks, compare attack success using different surrogate model architectures vs the predicted
-    architecture
--   some metric to define how close two models are.
--   relationship between power side channel and activation function
+Commands:
+-   profile tensorflow models: python collect_profiles.py -email -gpu 1 -folder tensorflow_profiles -i 50 -use_tf -noexe -models resnet50 resnet101 resnet152 vgg16 vgg19 densenet121 densenet169 densenet201 mobilenet_v2 mobilenet_v3_large mobilenet_v3_small
