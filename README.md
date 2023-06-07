@@ -27,33 +27,42 @@ pip3 install -r requirements.txt
 Notable files are outlined below.
 
 ```yaml
-plots/:                     # code for generating plots
-profiles/:
-  debug_profiles/:          # example profiles
-test/:                      # test code
-architecture_prediction.py  # training a model on a set of profiles
-collect_profiles.py         # automate profile collection
-                            # to make a dataset for training
-config.py                   # global parameter configuration
-construct_input.py          # the input to DNN when profiling
-create_exe.py               # create an executable for profiling
-data_engineering.py         # validating and massaging data
-datasets.py                 # manages image classification datasets
-download_dataset.py         # downloads a dataset from datasets.py
-email_sender.py             # configure email notification for
-                            # long-running experiments
-format_profiles.py          # parser for nvprof output
-get_model.py                # wrapper for getting DNN models
-logger.py                   # utility for logging during training
-model_inference.py          # target file for the executable,
-                            # this is what will be profiled
-model_manager.py            # training, profiling, and attacking
-                            # victim DNNs
-model_metrics.py            # accuracy calculations
-neural_network.py           # custom model for architecture
-                            # prediction
-online.py                   # calculate stats while training DNNs
-whitebox_pyprof.py          # using PyTorch's builtin profiler
+architecture_prediction/:
+  architecture_prediction.py  # training a model on a set of profiles
+plots/:                       # code for generating plots
+profiles/:                  
+  debug_profiles/:            # example profiles
+  collect_profiles.py         # automate profile collection
+                              # to make a dataset for training
+  construct_input.py          # the input to DNN when profiling
+  data_engineering.py         # validating and massaging data
+  format_profiles.py          # parser for nvprof output
+  whitebox_pyprof.py          # using PyTorch's builtin profiler
+exe/:
+  create_exe.py               # create an executable for profiling
+  model_inference.py          # target file for the executable,
+                              # this is what will be profiled
+datasets/:
+  datasets.py                 # manages image classification datasets
+  download_dataset.py         # downloads a dataset from datasets.py
+dnn/:
+  get_model.py                # wrapper for getting DNN models
+  model_manager.py            # training, profiling, and attacking
+                              # victim DNNs
+  model_metrics.py            # accuracy calculations
+  neural_network.py           # custom model for architecture
+                              # prediction
+test/:                        # test code
+tensorflow/:
+  create_exe.py               # creates an exe for tensorflow profiling
+  tensorflow_inference.py     # target file for tensorflow executables
+utils/:
+  config.py                   # global parameter configuration
+  email_sender.py             # configure email notification for
+                              # long-running experiments
+  logger.py                   # utility for logging during training
+  online.py                   # calculate stats while training DNNs
+
 # supporting files
 ```
 

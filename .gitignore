@@ -24,11 +24,14 @@ plots/cross_gpu_acc
 plots/prune_pred_acc
 plots/top_n_features
 plots/surrogate_acc
+plots/cross_ml_framework
+plots/knockoff_class_importance
+plots/arch_pred_acc
 onnx_models/
 plots/theoretical_dummy/
 knockoff/
 # tensorflow/
-test_tensorflow.py
+test_knockoff*.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
