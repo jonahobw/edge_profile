@@ -14,6 +14,7 @@ from model_manager import (
     PruneModelManager,
     QuantizedModelManager,
     StructuredPruneModelManager,
+    StructuredPruneModelManager,
 )
 from architecture_prediction import get_arch_pred_model, ArchPredBase
 from utils import latest_file, dict_to_str
@@ -245,6 +246,7 @@ def pruneOneVictim(
     gpu: int = -1,
     save: bool = True,
     structured: bool = False,
+    debug: int = None,
 ):
     """Victim models must be trained already"""
     constructor = StructuredPruneModelManager if structured else PruneModelManager
@@ -254,6 +256,7 @@ def pruneOneVictim(
         finetune_epochs=finetune_epochs,
         gpu=gpu,
         save_model=save,
+        debug=debug,
     )
 
 
@@ -264,6 +267,7 @@ def pruneVictimModels(
     gpu: int = -1,
     save: bool = True,
     structured: bool = False,
+    debug: int = None,
 ):
     """Victim models must be trained already"""
     for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
@@ -274,6 +278,7 @@ def pruneVictimModels(
             gpu=gpu,
             save=save,
             structured=structured,
+            debug=debug,
         )
 
 
@@ -766,7 +771,6 @@ if __name__ == "__main__":
     pruneVictimModels(
         finetune_epochs=0,
         structured=True,
-        save=False,
     )
 
     # Step 2: Profile predicted models
