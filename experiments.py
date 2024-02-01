@@ -282,6 +282,22 @@ def pruneVictimModels(
         )
 
 
+def deletePrunedProfiles(
+    prefix: str = None,
+    structured: bool = False,
+):
+    constructor = StructuredPruneModelManager if structured else PruneModelManager
+    for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
+        prune_path = (
+            vict_path.parent
+            / constructor.FOLDER_NAME
+            / constructor.MODEL_FILENAME
+        )
+        if prune_path.exists():
+            prune_manager = constructor.load(model_path=prune_path)
+            prune_manager.delete()
+    
+
 def profileAllPrunedModels(
     gpu: int = 0,
     prefix: str = None,
@@ -768,16 +784,17 @@ if __name__ == "__main__":
     # ---------------------------------------
     
     # Step 1: generate structured pruned models
-    pruneVictimModels(
-        finetune_epochs=0,
-        structured=True,
-    )
+    # pruneVictimModels(
+    #     finetune_epochs=0,
+    #     structured=True,
+    # )
+    deletePrunedProfiles(structured=True)
 
     # Step 2: Profile predicted models
-    profileAllPrunedModels(
-        gpu=0,
-        structured=True,
-    )
+    # profileAllPrunedModels(
+    #     gpu=0,
+    #     structured=True,
+    # )
 
     # Step 3: Load Profiles to a folder
     # loadPrunedProfilesToFolder(

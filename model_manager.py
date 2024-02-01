@@ -7,6 +7,7 @@ the surrogate model can be trained using labels from the victim model.
 
 import datetime
 import json
+import shutil
 from pathlib import Path
 import random
 import sys
@@ -214,6 +215,15 @@ class ModelManagerBase(ABC):
         path = self.path / f"params_{timestamp}.json"
         with open(path, "w+") as f:
             json.dump(self.config, f, indent=4)
+
+    def delete(self):
+        """
+        Deletes the folder for this model.
+        """
+        path = Path(self.path)
+        if path.exists() and path.is_dir():
+            shutil.rmtree(path)
+            print(f"Deleted {str(path.relative_to(Path.cwd()))}")
 
     @staticmethod
     def loadConfig(path: Path) -> dict:
