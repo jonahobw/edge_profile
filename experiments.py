@@ -13,6 +13,7 @@ from model_manager import (
     SurrogateModelManager,
     PruneModelManager,
     QuantizedModelManager,
+    StructuredPruneModelManager,
 )
 from architecture_prediction import get_arch_pred_model, ArchPredBase
 from utils import latest_file, dict_to_str
@@ -243,9 +244,11 @@ def pruneOneVictim(
     finetune_epochs: int = 20,
     gpu: int = -1,
     save: bool = True,
+    structured: bool = False,
 ):
     """Victim models must be trained already"""
-    prune_manager = PruneModelManager(
+    constructor = StructuredPruneModelManager if structured else PruneModelManager
+    prune_manager = constructor(
         victim_model_path=vict_path,
         ratio=ratio,
         finetune_epochs=finetune_epochs,
@@ -260,6 +263,7 @@ def pruneVictimModels(
     finetune_epochs: int = 20,
     gpu: int = -1,
     save: bool = True,
+    structured: bool = False,
 ):
     """Victim models must be trained already"""
     for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
@@ -269,6 +273,7 @@ def pruneVictimModels(
             finetune_epochs=finetune_epochs,
             gpu=gpu,
             save=save,
+            structured=structured,
         )
 
 
@@ -278,16 +283,18 @@ def profileAllPrunedModels(
     nvprof_args: dict = {},
     count: int = 1,
     add: bool = False,
+    structured: bool = False,
 ):
     """Pruned models must be trained already."""
+    constructor = StructuredPruneModelManager if structured else PruneModelManager
     for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
         prune_path = (
             vict_path.parent
-            / PruneModelManager.FOLDER_NAME
-            / PruneModelManager.MODEL_FILENAME
+            / constructor.FOLDER_NAME
+            / constructor.MODEL_FILENAME
         )
         if prune_path.exists():
-            prune_manager = PruneModelManager.load(model_path=prune_path, gpu=gpu)
+            prune_manager = constructor.load(model_path=prune_path, gpu=gpu)
             assert prune_manager.config["epochs_trained"] > 0
             if prune_manager.isProfiled() and not add:
                 print(f"{prune_manager.model_name} is already profiled, skipping...")
@@ -363,9 +370,10 @@ def loadPrunedProfilesToFolder(
     replace: bool = False,
     filters: dict = None,
     all: bool = True,
+    structured: bool = False,
 ):
     """
-    Same as loadPrunedProfilesToFolder, but for pruned models
+    Same as loadProfilesToFolder, but for pruned models
     """
     config_name = "config.json"
     all_config = {}
@@ -382,16 +390,19 @@ def loadPrunedProfilesToFolder(
     folder.mkdir(exist_ok=True, parents=True)
 
     file_count = 0
-
+    constructor = StructuredPruneModelManager if structured else PruneModelManager
+    
     for vict_path in VictimModelManager.getModelPaths(prefix=prefix):
         prune_path = (
             vict_path.parent
-            / PruneModelManager.FOLDER_NAME
-            / PruneModelManager.MODEL_FILENAME
+            / constructor.FOLDER_NAME
+            / constructor.MODEL_FILENAME
         )
         if prune_path.exists():
-            manager = PruneModelManager.load(model_path=prune_path)
-            assert manager.config["epochs_trained"] > 0
+            manager = constructor.load(model_path=prune_path)
+            # below commented to allow for models that have been pruned
+            # but not fine tuned
+            # assert manager.config["epochs_trained"] > 0
 
             profiles = manager.getAllProfiles(filters=filters)
             if not all:
@@ -736,14 +747,41 @@ if __name__ == "__main__":
     #     gpu=0,
     #     model_paths=model_paths,
     # )
-    trainSurrogateModels(
-        predict=False,
-        pretrained=True,
-        epochs=[20, 20, 10],
-        patience=[7, 7, 3],
-        lr=[1, 0.1, 0.01],
-        run_attack=True,
-        gpu=0,
-        data_idx=0, # train on the same data as victim
+    # trainSurrogateModels(
+    #     predict=False,
+    #     pretrained=True,
+    #     epochs=[20, 20, 10],
+    #     patience=[7, 7, 3],
+    #     lr=[1, 0.1, 0.01],
+    #     run_attack=True,
+    #     gpu=0,
+    #     data_idx=0, # train on the same data as victim
+    # )
+
+    # ---------------------------------------
+    # Structured pruning workflow
+    # ---------------------------------------
+    
+    # Step 1: generate structured pruned models
+    pruneVictimModels(
+        finetune_epochs=0,
+        structured=True,
+        save=False,
     )
+
+    # Step 2: Profile predicted models
+    profileAllPrunedModels(
+        gpu=0,
+        structured=True,
+    )
+
+    # Step 3: Load Profiles to a folder
+    # loadPrunedProfilesToFolder(
+    #     folder_name= "victim_profiles_pruned_structured",
+    #     structured=True,
+    # )
+
+    # Step 4: Predict Architecture from Profiles, this is done through
+    # a separate function in plots/ which calls the predictVictimArchs function here
+
     exit(0)

@@ -32,6 +32,7 @@ plots/theoretical_dummy/
 knockoff/
 # tensorflow/
 test_knockoff*.csv
+ezclone/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -290,6 +290,9 @@ class ModelManagerBase(ABC):
         assert self.dataset is not None
         assert self.model is not None, "Must call constructModel() first"
 
+        if num_epochs == 0:
+            return
+
         if lr is None:
             lr = getModelParams(self.architecture).get("lr", 0.1)
 
@@ -1349,7 +1352,16 @@ class PruneModelManager(ProfiledModelManager):
         )
         self.updateConfigSparsity()
 
-    def paramsToPrune(self) -> List[Tuple[torch.nn.Module, str]]:
+    def paramsToPrune(
+        self, min_dims=None, conv_only=False
+    ) -> List[Tuple[torch.nn.Module, str]]:
+        """
+        min_dims (int, default None) - if provided, will only add modules
+            whose weight parameter has at least min_dims dimensions.  This
+            is used for structured pruning.
+        conv_only (bool, default False) - if enabled, will only prune
+            convolution layers.
+        """
         res = []
         for name, module in self.model.named_modules():
             if name.startswith("classifier"):
@@ -1357,7 +1369,11 @@ class PruneModelManager(ProfiledModelManager):
             if name.startswith("fc"):
                 continue
             if hasattr(module, "weight"):
-                res.append((module, "weight"))
+                if min_dims == None or module.weight.ndim > min_dims:
+                    if not conv_only or isinstance(
+                        module, (torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d)
+                    ):
+                        res.append((module, "weight"))
         self.pruned_modules = res
         return res
 
@@ -1411,6 +1427,44 @@ class PruneModelManager(ProfiledModelManager):
         victim_path = load_folder.parent / VictimModelManager.MODEL_FILENAME
         conf = ModelManagerBase.loadConfig(load_folder)
         return PruneModelManager(
+            victim_model_path=victim_path,
+            ratio=conf["ratio"],
+            finetune_epochs=conf["finetune_epochs"],
+            gpu=gpu,
+            load_path=model_path,
+        )
+
+
+class StructuredPruneModelManager(PruneModelManager):
+    FOLDER_NAME = "structured_prune"
+    MODEL_FILENAME = "structured_pruned.pt"
+
+    def prune(self) -> None:
+        # modifies self.model (through self.pruned_params)
+        for module, name in self.pruned_modules:
+            prune.ln_structured(
+                module=module,
+                name=name,
+                amount=self.ratio,
+                n=2,
+                dim=1,  # dim 1 is the channel dimension in PyTorch
+            )
+        self.updateConfigSparsity()
+
+    def paramsToPrune(
+        self, min_dims=2, conv_only=True
+    ) -> List[Tuple[torch.nn.Module, str]]:
+        # override superclass implementation and change default args
+        return super().paramsToPrune(min_dims, conv_only)
+
+    @staticmethod
+    def load(model_path: Path, gpu: int = -1):
+        """model_path is a path to the pruned model checkpoint"""
+
+        load_folder = Path(model_path).parent  # the prune folder
+        victim_path = load_folder.parent / VictimModelManager.MODEL_FILENAME
+        conf = ModelManagerBase.loadConfig(load_folder)
+        return StructuredPruneModelManager(
             victim_model_path=victim_path,
             ratio=conf["ratio"],
             finetune_epochs=conf["finetune_epochs"],
@@ -1478,7 +1532,7 @@ class SurrogateModelManager(ModelManagerBase):
             model_name=f"surrogate_{self.victim_model.model_name}_{architecture}",
             path=path,
             dataset=self.victim_model.dataset.name,
-            data_subset_percent= 1 - self.victim_model.data_subset_percent,
+            data_subset_percent=1 - self.victim_model.data_subset_percent,
             data_idx=data_idx,
             gpu=gpu,
             save_model=save_model,
@@ -1906,7 +1960,9 @@ def getVictimSurrogateModels(
 
 
 def getModelsFromSurrogateTrainStrategies(
-    strategies: dict, architectures: List[str], latest_file: bool=True,
+    strategies: dict,
+    architectures: List[str],
+    latest_file: bool = True,
 ) -> Dict[str, Dict[str, Path]]:
     """
     architectures is a list of DNN architecture strings, like config.MODELS
@@ -1976,12 +2032,16 @@ def getModelsFromSurrogateTrainStrategies(
         for arch in architectures:
             found = False
             for vict_path in models_satisfying_strategy:
-                if vict_path.parent.parent.name == arch:    #str(vict_path).find(arch) >= 0:
+                if (
+                    vict_path.parent.parent.name == arch
+                ):  # str(vict_path).find(arch) >= 0:
                     found = True
                     assert (
                         len(models_satisfying_strategy[vict_path]) > 0
                     ), f"Could not find any surrogate models with arch {arch} and strategy {strategies[strategy]}"
-                    strategy_result[arch] = latestFileFromList(models_satisfying_strategy[vict_path], oldest= not latest_file)
+                    strategy_result[arch] = latestFileFromList(
+                        models_satisfying_strategy[vict_path], oldest=not latest_file
+                    )
                     break
             assert (
                 found
