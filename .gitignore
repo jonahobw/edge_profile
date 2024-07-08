@@ -27,8 +27,10 @@ plots/surrogate_acc
 plots/cross_ml_framework
 plots/knockoff_class_importance
 plots/arch_pred_acc
+plots/structured_prune_pred_acc
 onnx_models/
 plots/theoretical_dummy/
+victim_profiles_pruned_structured/
 knockoff/
 # tensorflow/
 test_knockoff*.csv
